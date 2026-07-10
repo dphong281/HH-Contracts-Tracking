@@ -29,11 +29,24 @@ VITE_ENCRYPTION_KEY=xem_muc_5_ben_duoi
 npm run dev
 ```
 
-### Deploy free lên Vercel
+### Deploy free lên Cloudflare Pages (cho phép dùng thương mại — khác Vercel)
+
+⚠️ **Không dùng Vercel Hobby (free) cho app này** — điều khoản Vercel cấm rõ việc dùng Hobby cho mục đích thương mại (bao gồm cả nội bộ công ty, nhân viên được trả lương dùng/viết tool phục vụ công việc), Vercel có quyền tắt project bất cứ lúc nào không cần báo trước. **Cloudflare Pages** cho phép dùng thương mại ngay ở gói free, không giới hạn băng thông, đúng tinh thần "0 đồng" mà vẫn an toàn về mặt điều khoản.
+
 1. Push code lên GitHub repo (**Private** — vì chứa dữ liệu kinh doanh)
-2. [vercel.com](https://vercel.com) → New Project → chọn repo
-3. **Environment Variables**: thêm cả 3 biến trong `.env`
-4. Deploy — domain dạng `xxx.vercel.app`, hoàn toàn free
+2. Vào [dash.cloudflare.com](https://dash.cloudflare.com) → đăng ký/đăng nhập (miễn phí, không cần thẻ)
+3. Sidebar trái → **Workers & Pages** → **Create** → tab **Pages** → **Connect to Git** → chọn repo `qlhd`
+4. Ở phần cấu hình build:
+   - **Framework preset**: chọn `Vite` (Cloudflare tự điền sẵn build command/output nếu có)
+   - **Build command**: `npm run build`
+   - **Build output directory**: `dist`
+5. Trước khi bấm Save and Deploy, mở **Environment Variables**, thêm cả 3 biến (copy từ file `.env`):
+   - `VITE_SUPABASE_URL`
+   - `VITE_SUPABASE_ANON_KEY`
+   - `VITE_ENCRYPTION_KEY`
+6. **Save and Deploy** — chờ ~1-2 phút, Cloudflare cấp domain dạng `qlhd-xxx.pages.dev`
+
+Mỗi lần push code mới lên nhánh `main`, Cloudflare Pages tự động build và deploy lại — không cần làm gì thêm.
 
 ---
 
@@ -109,7 +122,7 @@ Tìm kiếm/lọc vẫn hoạt động bình thường trên trường đã mã 
 3. Lưu khoá này ở nơi an toàn riêng (trình quản lý mật khẩu) — mất khoá = mất vĩnh viễn toàn bộ dữ liệu đã mã hoá, không có cách khôi phục, kể cả chính bạn.
 4. Chạy `migration_encryption.sql` trong SQL Editor
 5. Admin → Cài đặt → Mã hoá dữ liệu cũ → chạy 1 lần (mã hoá nốt dữ liệu tạo trước khi bật tính năng này)
-6. Deploy Vercel: thêm `VITE_ENCRYPTION_KEY` vào Environment Variables
+6. Nếu đã deploy Cloudflare Pages: thêm `VITE_ENCRYPTION_KEY` vào Environment Variables của project đó, rồi deploy lại
 
 ---
 

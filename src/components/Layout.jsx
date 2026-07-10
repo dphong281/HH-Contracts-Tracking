@@ -19,10 +19,10 @@ export default function Layout({ children }) {
       <aside className="w-64 shrink-0 bg-[var(--color-ink)] text-white flex flex-col">
         <div className="px-6 py-6 border-b border-white/10">
           <div className="text-[11px] tracking-[0.2em] text-[var(--color-amber)] font-semibold uppercase">
-            Hoang Ha
+            Hoàng Hà
           </div>
           <div className="font-display text-xl font-semibold leading-tight mt-1">
-            Contract Management
+            Theo dõi<br />Hợp đồng đầu ra
           </div>
         </div>
         <nav className="flex-1 px-3 py-4 space-y-1">

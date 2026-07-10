@@ -9,6 +9,11 @@ if (!supabaseUrl || !supabaseAnonKey) {
   )
 }
 
+// persistSession: false — CỐ Ý không lưu phiên đăng nhập qua localStorage.
+// Mỗi lần mở lại app (đóng tab, F5, mở trình duyệt mới...) sẽ luôn phải đăng nhập lại,
+// chỉ email được nhớ sẵn (xem src/pages/Login.jsx) — theo đúng yêu cầu bảo mật.
+// Trong lúc đang dùng app (không đóng/mở lại tab), phiên vẫn hoạt động bình thường,
+// không bị tự đăng xuất giữa chừng.
 export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
   auth: {
     persistSession: false,

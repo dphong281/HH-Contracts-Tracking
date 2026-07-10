@@ -71,6 +71,12 @@ create policy "xem nhat ky" on nhat_ky_hoat_dong for select using (auth.role() =
 -- chỉ trigger (chạy quyền definer) mới được ghi vào bảng này.
 
 -- 4. TRIGGER FUNCTION dùng chung để ghi nhật ký cho các bảng nghiệp vụ
+-- ============================================
+-- FIX: hàm fn_ghi_nhat_ky() bị lỗi khi xoá/sửa vì CASE kiểm tra chéo field
+-- trên kiểu RECORD (old/new). Đổi sang IF/ELSIF để mỗi nhánh chạy độc lập.
+-- An toàn để chạy nhiều lần (CREATE OR REPLACE).
+-- ============================================
+
 create or replace function fn_ghi_nhat_ky()
 returns trigger
 language plpgsql
@@ -81,7 +87,8 @@ declare
   v_ten text;
   v_mo_ta text;
   v_ban_ghi_id uuid;
-  v_nhan_dang text;
+  v_nhan_dang text := '';
+  v_ten_bang text;
 begin
   select ho_ten into v_ten from tai_khoan where id = auth.uid();
 
@@ -91,29 +98,47 @@ begin
     v_ban_ghi_id := new.id;
   end if;
 
-  v_nhan_dang := case tg_table_name
-    when 'hop_dong_dau_ra' then coalesce((case when tg_op = 'DELETE' then old.so_hop_dong else new.so_hop_dong end), '')
-    when 'khach_hang' then coalesce((case when tg_op = 'DELETE' then old.ten_khach_hang else new.ten_khach_hang end), '')
-    when 'nhan_vien' then coalesce((case when tg_op = 'DELETE' then old.ho_ten else new.ho_ten end), '')
-    when 'thanh_toan' then 'khoản thanh toán'
-    when 'phu_luc_hop_dong' then coalesce((case when tg_op = 'DELETE' then old.ten_phu_luc else new.ten_phu_luc end), '')
-    else ''
-  end;
+  if tg_table_name = 'hop_dong_dau_ra' then
+    v_ten_bang := 'hợp đồng';
+    if tg_op = 'DELETE' then
+      v_nhan_dang := coalesce(old.so_hop_dong, '');
+    else
+      v_nhan_dang := coalesce(new.so_hop_dong, '');
+    end if;
+  elsif tg_table_name = 'khach_hang' then
+    v_ten_bang := 'khách hàng';
+    if tg_op = 'DELETE' then
+      v_nhan_dang := coalesce(old.ten_khach_hang, '');
+    else
+      v_nhan_dang := coalesce(new.ten_khach_hang, '');
+    end if;
+  elsif tg_table_name = 'nhan_vien' then
+    v_ten_bang := 'nhân viên';
+    if tg_op = 'DELETE' then
+      v_nhan_dang := coalesce(old.ho_ten, '');
+    else
+      v_nhan_dang := coalesce(new.ho_ten, '');
+    end if;
+  elsif tg_table_name = 'thanh_toan' then
+    v_ten_bang := 'thanh toán';
+    v_nhan_dang := 'khoản thanh toán';
+  elsif tg_table_name = 'phu_luc_hop_dong' then
+    v_ten_bang := 'phụ lục';
+    if tg_op = 'DELETE' then
+      v_nhan_dang := coalesce(old.ten_phu_luc, '');
+    else
+      v_nhan_dang := coalesce(new.ten_phu_luc, '');
+    end if;
+  else
+    v_ten_bang := tg_table_name;
+  end if;
 
   v_mo_ta := coalesce(v_ten, 'Người dùng đã xoá') || ' ' ||
     (case tg_op
       when 'INSERT' then 'đã thêm'
       when 'UPDATE' then 'đã cập nhật'
       when 'DELETE' then 'đã xoá'
-    end) || ' ' ||
-    (case tg_table_name
-      when 'hop_dong_dau_ra' then 'hợp đồng'
-      when 'khach_hang' then 'khách hàng'
-      when 'nhan_vien' then 'nhân viên'
-      when 'thanh_toan' then 'thanh toán'
-      when 'phu_luc_hop_dong' then 'phụ lục'
-      else tg_table_name
-    end) ||
+    end) || ' ' || v_ten_bang ||
     (case when v_nhan_dang <> '' then ' "' || v_nhan_dang || '"' else '' end);
 
   insert into nhat_ky_hoat_dong
@@ -123,7 +148,7 @@ begin
     tg_op,
     v_ban_ghi_id,
     auth.uid(),
-    coalesce(v_ten, null),
+    v_ten,
     case when tg_op in ('UPDATE', 'DELETE') then to_jsonb(old) else null end,
     case when tg_op in ('INSERT', 'UPDATE') then to_jsonb(new) else null end,
     v_mo_ta
