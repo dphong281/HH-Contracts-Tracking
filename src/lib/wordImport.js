@@ -31,6 +31,23 @@ function grabLine(labelRegex, block, stopWord) {
   return ''
 }
 
+// Tách riêng logic lấy Số hợp đồng — không dùng grabLine() thông thường vì cần
+// BỎ QUA các dòng "Số điện thoại"/"Số CCCD"/"Số tài khoản" cũng bắt đầu bằng
+// "Số" nhưng không phải số hợp đồng, và giữ nguyên mã dạng "15.2026/HĐMBXD/HH – TL"
+// (không cần chữ "HĐ" tách riêng thành nhãn như giả định trước đây).
+function extractSoHopDong(text) {
+  const lines = text.split('\n')
+  const excludePrefixes = /^(đi[ệe]n\s*tho[ạa]i|t[àa]i\s*kho[ảa]n|CCCD|CMND|nh[àa]|fax|email)/i
+  for (const line of lines) {
+    const m = line.match(/^\s*S[ốo]\s+(.+)/i) || line.match(/^\s*S[ốo]:(.+)/i)
+    if (m) {
+      const val = m[1].trim().replace(/^:+\s*/, '').trim()
+      if (val && !excludePrefixes.test(val)) return val.replace(/[ \t]+/g, ' ')
+    }
+  }
+  return ''
+}
+
 function toIsoDate(day, month, year) {
   if (!day || !month || !year) return ''
   return `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`
@@ -67,7 +84,7 @@ export function parseContractText(text) {
   const ma_so_thue = grabLine(/^\s*M[ãa]\s*s[ốo]\s*thu[ếe]\s*:?\s*(.*)/i, benBBlock)
 
   // Số hợp đồng — thường ghi dạng "Số ... HĐ:" ngay đầu văn bản
-  const so_hop_dong = grabLine(/^\s*S[ốo]\s*:?\s*H[ĐD]\s*:?\s*(.*)/i, clean.slice(0, 500))
+  const so_hop_dong = extractSoHopDong(clean.slice(0, 800))
 
   // Ngày ký / ngày bắt đầu hiệu lực — "ngày 01 tháng 01 năm 2026"
   let ngay_bat_dau = ''
