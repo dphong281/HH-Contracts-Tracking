@@ -5,6 +5,28 @@ import { encryptField, encryptFields, decryptField, decryptFields, decryptList }
 const KHACH_HANG_ENCRYPTED = ['dia_chi', 'so_dien_thoai', 'ma_so_thue']
 const NHAN_VIEN_ENCRYPTED = ['so_dien_thoai', 'email']
 
+// ---------- KHOÁ ĐỒNG THỜI (optimistic lock) ----------
+// Ném ra khi phát hiện có người khác đã sửa bản ghi này trước bạn (dựa theo
+// cột updated_at — tự động cập nhật qua trigger DB mỗi lần UPDATE thành công).
+export class ConflictError extends Error {
+  constructor() {
+    super('Dữ liệu này đã bị người khác thay đổi kể từ khi bạn mở form. Vui lòng tải lại trang rồi thử lại.')
+    this.name = 'ConflictError'
+  }
+}
+
+// updateWithLock: nếu truyền expectedUpdatedAt, chỉ update thành công khi
+// updated_at hiện tại trên DB VẪN khớp giá trị lúc bạn tải form lên — nếu
+// khác (ai đó đã sửa trước), trả về ConflictError thay vì ghi đè âm thầm.
+async function updateWithLock(table, id, expectedUpdatedAt, payload) {
+  let query = supabase.from(table).update(payload).eq('id', id)
+  if (expectedUpdatedAt) query = query.eq('updated_at', expectedUpdatedAt)
+  const res = await query.select().maybeSingle()
+  if (res.error) return res
+  if (!res.data && expectedUpdatedAt) return { data: null, error: new ConflictError() }
+  return res
+}
+
 // ---------- KHÁCH HÀNG ----------
 export async function getKhachHangList() {
   const res = await supabase.from('khach_hang').select('*').order('created_at', { ascending: false })
@@ -20,9 +42,9 @@ export async function createKhachHang(payload) {
   const encrypted = await encryptFields(payload, KHACH_HANG_ENCRYPTED)
   return supabase.from('khach_hang').insert(encrypted).select().single()
 }
-export async function updateKhachHang(id, payload) {
+export async function updateKhachHang(id, payload, expectedUpdatedAt) {
   const encrypted = await encryptFields(payload, KHACH_HANG_ENCRYPTED)
-  return supabase.from('khach_hang').update(encrypted).eq('id', id).select().single()
+  return updateWithLock('khach_hang', id, expectedUpdatedAt, encrypted)
 }
 export async function deleteKhachHang(id) {
   return supabase.from('khach_hang').delete().eq('id', id)
@@ -77,12 +99,12 @@ export async function createHopDong(payload) {
   if (res.error) return res
   return { ...res, data: await decryptHopDong(res.data) }
 }
-export async function updateHopDong(id, payload) {
+export async function updateHopDong(id, payload, expectedUpdatedAt) {
   const encrypted = { ...payload }
   if ('gia_tri_hop_dong' in encrypted) {
     encrypted.gia_tri_hop_dong = await encryptField(encrypted.gia_tri_hop_dong)
   }
-  const res = await supabase.from('hop_dong_dau_ra').update(encrypted).eq('id', id).select().single()
+  const res = await updateWithLock('hop_dong_dau_ra', id, expectedUpdatedAt, encrypted)
   if (res.error) return res
   return { ...res, data: await decryptHopDong(res.data) }
 }

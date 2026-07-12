@@ -4,6 +4,7 @@ import {
   createKhachHang,
   updateKhachHang,
   deleteKhachHang,
+  ConflictError,
 } from '../lib/queries'
 import { PHAN_LOAI_LABELS } from '../lib/format'
 import { useRealtimeRefresh } from '../lib/useRealtime'
@@ -78,16 +79,23 @@ export default function KhachHang() {
     e.preventDefault()
     setSaving(true)
     const payload = { ...form }
+    const expectedUpdatedAt = payload.updated_at
     delete payload.id
     delete payload.created_at
     delete payload.updated_at
 
     const { error } = editing
-      ? await updateKhachHang(editing.id, payload)
+      ? await updateKhachHang(editing.id, payload, expectedUpdatedAt)
       : await createKhachHang(payload)
 
     setSaving(false)
     if (error) {
+      if (error instanceof ConflictError) {
+        alert(error.message)
+        setModalOpen(false)
+        load()
+        return
+      }
       alert('Lỗi lưu dữ liệu: ' + error.message)
       return
     }

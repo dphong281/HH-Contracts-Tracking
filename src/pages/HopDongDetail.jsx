@@ -5,6 +5,7 @@ import {
   getKhachHangList, getNhanVienList,
   getPhuLucByHopDong, createPhuLuc, deletePhuLuc,
   getThanhToanByHopDong, createThanhToan, deleteThanhToan,
+  ConflictError,
 } from '../lib/queries'
 import { PHAN_LOAI_LABELS, TRANG_THAI_LABELS, TRANG_THAI_COLORS, formatCurrency, formatDate, daysUntil } from '../lib/format'
 import {
@@ -64,6 +65,7 @@ export default function HopDongDetail() {
       trang_thai: hd.trang_thai,
       ghi_chu: hd.ghi_chu || '',
       ghi_chu_hop_dong: hd.ghi_chu_hop_dong || '',
+      _expectedUpdatedAt: hd.updated_at,
     })
     setEditOpen(true)
   }
@@ -71,17 +73,27 @@ export default function HopDongDetail() {
   async function handleSaveEdit(e) {
     e.preventDefault()
     setSaving(true)
+    const { _expectedUpdatedAt, ...rest } = editForm
     const payload = {
-      ...editForm,
+      ...rest,
       khach_hang_id: editForm.khach_hang_id || null,
       nhan_vien_id: editForm.nhan_vien_id || null,
       gia_tri_hop_dong: Number(editForm.gia_tri_hop_dong) || 0,
       ngay_bat_dau: editForm.ngay_bat_dau || null,
       ngay_ket_thuc: editForm.ngay_ket_thuc || null,
     }
-    const { error } = await updateHopDong(id, payload)
+    const { error } = await updateHopDong(id, payload, _expectedUpdatedAt)
     setSaving(false)
-    if (error) { alert('Lỗi: ' + error.message); return }
+    if (error) {
+      if (error instanceof ConflictError) {
+        alert(error.message)
+        setEditOpen(false)
+        load()
+        return
+      }
+      alert('Lỗi: ' + error.message)
+      return
+    }
     setEditOpen(false)
     load()
   }
