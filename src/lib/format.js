@@ -22,7 +22,7 @@ export function daysUntil(dateStr) {
 export const PHAN_LOAI_LABELS = {
   DL: 'Đại lý',
   MB: 'Mua bán',
-  TNPP: 'Tổng NPP',
+  TNPP: 'Thương nhân phân phối',
   TTTT: 'Tiêu thụ trực tiếp',
 }
 

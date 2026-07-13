@@ -99,10 +99,19 @@ export function parseContractText(text) {
   if (endMatch) ngay_ket_thuc = toIsoDate(endMatch[1], endMatch[2], endMatch[3])
 
   // Đoán phân loại khách hàng dựa trên loại hợp đồng
+  const hasWord = (re) => re.test(clean)
+  const hasAbbrev = (code) => new RegExp(`(^|[\\s:.,(])${code}([\\s:.,)]|$)`, 'i').test(clean)
+
   let phan_loai_goi_y = ''
-  if (/T\s*N\s*P\s*P|t[ổo]ng\s*(nh[àa]\s*)?ph[âa]n\s*ph[ốo]i/i.test(clean)) phan_loai_goi_y = 'TNPP'
-  else if (/t[ổo]ng\s*đ[ạa]i\s*l[ýy]|đ[ạa]i\s*l[ýy]/i.test(clean)) phan_loai_goi_y = 'DL'
-  else if (/ti[êe]u\s*th[ụu]\s*tr[ựu]c\s*ti[ếe]p/i.test(clean)) phan_loai_goi_y = 'TTTT'
+  if (hasWord(/T\s*N\s*P\s*P/i) || hasWord(/th[ưu][ơo]ng\s*nh[âa]n\s*ph[âa]n\s*ph[ốo]i/i) || hasAbbrev('TNPP')) {
+    phan_loai_goi_y = 'TNPP'
+  } else if (hasWord(/t[ổo]ng\s*đ[ạa]i\s*l[ýy]|đ[ạa]i\s*l[ýy]/i) || hasAbbrev('ĐL') || hasAbbrev('DL')) {
+    phan_loai_goi_y = 'DL'
+  } else if (hasWord(/ti[êe]u\s*th[ụu]\s*tr[ựu]c\s*ti[ếe]p/i) || hasAbbrev('TTTT')) {
+    phan_loai_goi_y = 'TTTT'
+  } else if (hasAbbrev('MB')) {
+    phan_loai_goi_y = 'MB'
+  }
 
   return {
     ten_khach_hang,
