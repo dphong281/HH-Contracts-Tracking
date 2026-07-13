@@ -237,11 +237,12 @@ export async function updateTaiKhoan(id, payload) {
 
 // ---------- YÊU CẦU HỖ TRỢ (quên mật khẩu) ----------
 export async function createYeuCauQuenMatKhau({ email, so_dien_thoai, ghi_chu }) {
+  // Cố tình KHÔNG .select() sau insert — người gửi yêu cầu (chưa đăng nhập)
+  // không có quyền đọc lại bảng này (chỉ Admin đọc được), nên nếu cố đọc lại
+  // Postgres sẽ báo gộp thành lỗi RLS dù bản ghi đã ghi thành công.
   return supabase
     .from('yeu_cau_ho_tro')
     .insert({ loai: 'quen_mat_khau', email, so_dien_thoai, ghi_chu: ghi_chu || null })
-    .select()
-    .single()
 }
 export async function getYeuCauHoTroList() {
   return supabase.from('yeu_cau_ho_tro').select('*').order('created_at', { ascending: false })
