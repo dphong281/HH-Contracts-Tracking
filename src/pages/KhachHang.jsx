@@ -68,14 +68,12 @@ export default function KhachHang() {
   const [taiLieus, setTaiLieus] = useState([])
   const [taiLieusLoading, setTaiLieusLoading] = useState(false)
 
-  // Nhập giấy tờ (PDF/ảnh) — đọc & tự so khớp khách hàng
+  // Nhập giấy tờ (PDF/ảnh) — đọc & tự so khớp khách hàng, hỗ trợ chọn nhiều file 1 lúc
   const [importingDoc, setImportingDoc] = useState(false)
   const [importProgress, setImportProgress] = useState(0)
   const [docImportError, setDocImportError] = useState(null)
   const [docImportOpen, setDocImportOpen] = useState(false)
-  const [docImportData, setDocImportData] = useState(null) // { file, parsed, khach_hang_id }
-  const [docKhachHangMode, setDocKhachHangMode] = useState('existing') // 'existing' | 'new'
-  const [docNewKhachHang, setDocNewKhachHang] = useState(EMPTY_FORM)
+  const [docQueue, setDocQueue] = useState([]) // [{ key, file, parsed, khach_hang_id, mode, newForm }]
 
   useEffect(() => {
     load()
@@ -169,92 +167,130 @@ export default function KhachHang() {
   }
 
   async function handleDocFileSelected(e) {
-    const file = e.target.files?.[0]
+    const files = Array.from(e.target.files || [])
     e.target.value = ''
-    if (!file) return
+    if (files.length === 0) return
 
     setImportingDoc(true)
     setImportProgress(0)
     setDocImportError(null)
-    try {
-      const parsed = await extractAndParseDocument(file, (p) => setImportProgress(Math.round(p * 100)))
 
-      const candidateName = parsed.ten_doanh_nghiep || parsed.ten_thuong_nhan || parsed.ho_ten || ''
-      const candidateMst = (parsed.ma_so_thue || '').replace(/\s/g, '')
+    const queue = []
+    const failed = []
 
-      let match = null
-      if (candidateMst) {
-        match = list.find((kh) => kh.ma_so_thue && kh.ma_so_thue.replace(/\s/g, '') === candidateMst)
-      }
-      if (!match && candidateName) {
-        const norm = normalizeVN(candidateName)
-        match = list.find((kh) => normalizeVN(kh.ten_khach_hang) === norm)
-      }
-
-      if (!match) {
-        setDocImportError(
-          `Không tự tìm được khách hàng khớp (tên/MST đọc được: "${candidateName || '—'}" / "${parsed.ma_so_thue || '—'}"). Chọn khách hàng thủ công bên dưới.`
+    for (let i = 0; i < files.length; i++) {
+      const file = files[i]
+      try {
+        const parsed = await extractAndParseDocument(file, (p) =>
+          setImportProgress(Math.round(((i + p) / files.length) * 100))
         )
-      }
 
-      setDocImportData({ file, parsed, khach_hang_id: match ? match.id : '' })
-      setDocKhachHangMode(match ? 'existing' : 'new')
-      setDocNewKhachHang({
-        ...EMPTY_FORM,
-        ten_khach_hang: candidateName,
-        ma_so_thue: parsed.ma_so_thue || '',
-        dia_chi: parsed.dia_chi_tru_so || parsed.dia_diem_kd || parsed.noi_thuong_tru || '',
-      })
-      setDocImportOpen(true)
-    } catch (err) {
-      setDocImportError('Không đọc được file: ' + err.message)
-    } finally {
-      setImportingDoc(false)
-      setImportProgress(0)
+        const candidateName = parsed.ten_doanh_nghiep || parsed.ten_thuong_nhan || parsed.ho_ten || ''
+        const candidateMst = (parsed.ma_so_thue || '').replace(/\s/g, '')
+
+        let match = null
+        if (candidateMst) {
+          match = list.find((kh) => kh.ma_so_thue && kh.ma_so_thue.replace(/\s/g, '') === candidateMst)
+        }
+        if (!match && candidateName) {
+          const norm = normalizeVN(candidateName)
+          match = list.find((kh) => normalizeVN(kh.ten_khach_hang) === norm)
+        }
+
+        queue.push({
+          key: `${file.name}-${i}-${Date.now()}`,
+          file,
+          parsed,
+          khach_hang_id: match ? match.id : '',
+          mode: match ? 'existing' : 'new',
+          newForm: {
+            ...EMPTY_FORM,
+            ten_khach_hang: candidateName,
+            ma_so_thue: parsed.ma_so_thue || '',
+            dia_chi: parsed.dia_chi_tru_so || parsed.dia_diem_kd || parsed.noi_thuong_tru || '',
+          },
+        })
+      } catch (err) {
+        failed.push(`${file.name}: ${err.message}`)
+      }
+      setImportProgress(Math.round(((i + 1) / files.length) * 100))
     }
+
+    setImportingDoc(false)
+    setImportProgress(0)
+
+    if (failed.length > 0) {
+      setDocImportError(`Không đọc được ${failed.length} file — ${failed.join('; ')}`)
+    }
+    if (queue.length > 0) {
+      setDocQueue(queue)
+      setDocImportOpen(true)
+    }
+  }
+
+  function updateQueueItem(key, patch) {
+    setDocQueue((prev) => prev.map((it) => (it.key === key ? { ...it, ...patch } : it)))
+  }
+
+  function updateQueueItemNewForm(key, patch) {
+    setDocQueue((prev) => prev.map((it) => (it.key === key ? { ...it, newForm: { ...it.newForm, ...patch } } : it)))
+  }
+
+  function removeQueueItem(key) {
+    setDocQueue((prev) => prev.filter((it) => it.key !== key))
   }
 
   async function handleConfirmDocImport(e) {
     e.preventDefault()
-    let khachHangId = docImportData.khach_hang_id
-
     setSaving(true)
 
-    if (docKhachHangMode === 'new') {
-      if (!docNewKhachHang.ten_khach_hang) {
-        alert('Cần có tên khách hàng để tạo mới.')
-        setSaving(false)
-        return
+    const errors = []
+    let attachedToEditing = false
+
+    for (const item of docQueue) {
+      let khachHangId = item.khach_hang_id
+
+      if (item.mode === 'new') {
+        if (!item.newForm.ten_khach_hang) {
+          errors.push(`${item.file.name}: cần nhập tên khách hàng để tạo mới`)
+          continue
+        }
+        const { data: khData, error: khError } = await createKhachHang({
+          ten_khach_hang: item.newForm.ten_khach_hang,
+          phan_loai: item.newForm.phan_loai,
+          dia_chi: item.newForm.dia_chi || null,
+          so_dien_thoai: item.newForm.so_dien_thoai || null,
+          email: item.newForm.email || null,
+          ma_so_thue: item.newForm.ma_so_thue || null,
+          ghi_chu: item.newForm.ghi_chu || null,
+        })
+        if (khError) { errors.push(`${item.file.name}: lỗi tạo khách hàng — ${khError.message}`); continue }
+        khachHangId = khData.id
       }
-      const { data: khData, error: khError } = await createKhachHang({
-        ten_khach_hang: docNewKhachHang.ten_khach_hang,
-        phan_loai: docNewKhachHang.phan_loai,
-        dia_chi: docNewKhachHang.dia_chi || null,
-        so_dien_thoai: docNewKhachHang.so_dien_thoai || null,
-        email: docNewKhachHang.email || null,
-        ma_so_thue: docNewKhachHang.ma_so_thue || null,
-        ghi_chu: docNewKhachHang.ghi_chu || null,
-      })
-      if (khError) { alert('Lỗi tạo khách hàng: ' + khError.message); setSaving(false); return }
-      khachHangId = khData.id
+
+      if (!khachHangId) {
+        errors.push(`${item.file.name}: chưa chọn khách hàng để đính kèm`)
+        continue
+      }
+
+      const { error } = await uploadTaiLieuKhachHang(khachHangId, item.file, item.parsed.loai_giay_to)
+      if (error) { errors.push(`${item.file.name}: lỗi lưu file — ${error.message}`); continue }
+      if (editing?.id === khachHangId) attachedToEditing = true
     }
 
-    if (!khachHangId) {
-      alert('Cần chọn khách hàng có sẵn hoặc tạo khách hàng mới để đính kèm file.')
-      setSaving(false)
-      return
-    }
-
-    const { error } = await uploadTaiLieuKhachHang(khachHangId, docImportData.file, docImportData.parsed.loai_giay_to)
     setSaving(false)
-    if (error) { alert('Lỗi lưu file: ' + error.message); return }
     setDocImportOpen(false)
-    setDocImportData(null)
+    setDocQueue([])
     load()
+
     // Nếu đang mở đúng khách hàng vừa đính kèm, làm mới luôn danh sách giấy tờ trong modal.
-    if (editing?.id === khachHangId) {
-      const { data } = await getTaiLieuByKhachHang(khachHangId)
+    if (attachedToEditing) {
+      const { data } = await getTaiLieuByKhachHang(editing.id)
       setTaiLieus(data || [])
+    }
+
+    if (errors.length > 0) {
+      alert(`${errors.length} file không lưu được:\n` + errors.join('\n'))
     }
   }
 
@@ -278,6 +314,7 @@ export default function KhachHang() {
             ref={docInputRef}
             type="file"
             accept=".pdf,.png,.jpg,.jpeg,.webp"
+            multiple
             className="hidden"
             onChange={handleDocFileSelected}
           />
@@ -460,107 +497,117 @@ export default function KhachHang() {
         </form>
       </Modal>
 
-      {/* Modal xác nhận đính kèm giấy tờ vừa đọc */}
-      <Modal open={docImportOpen} onClose={() => setDocImportOpen(false)} title="Xác nhận đính kèm giấy tờ">
-        {docImportData && (
+      {/* Modal xác nhận đính kèm giấy tờ vừa đọc — có thể nhiều file cùng lúc */}
+      <Modal open={docImportOpen} onClose={() => setDocImportOpen(false)} title={`Xác nhận đính kèm giấy tờ (${docQueue.length} file)`} wide>
+        {docQueue.length > 0 && (
           <form onSubmit={handleConfirmDocImport} className="space-y-4">
-            <div className="text-sm">
-              <div className="text-xs text-[var(--color-text-muted)] mb-1">File</div>
-              {docImportData.file.name}
-            </div>
+            <div className="space-y-4 max-h-[60vh] overflow-y-auto pr-1">
+              {docQueue.map((item) => (
+                <div key={item.key} className="border border-[var(--color-line)] rounded-lg p-4 space-y-3">
+                  <div className="flex items-center justify-between">
+                    <div className="text-sm font-medium text-[var(--color-ink)] truncate">{item.file.name}</div>
+                    <button
+                      type="button"
+                      onClick={() => removeQueueItem(item.key)}
+                      className="text-xs text-[var(--color-danger)] hover:underline shrink-0 ml-3"
+                    >
+                      Bỏ qua file này
+                    </button>
+                  </div>
 
-            <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs p-3 rounded-lg bg-black/[0.02]">
-              <div><span className="text-[var(--color-text-muted)]">Loại giấy tờ:</span> {LOAI_GIAY_TO_LABELS[docImportData.parsed.loai_giay_to] || '—'}</div>
-              <div><span className="text-[var(--color-text-muted)]">Nguồn đọc:</span> {docImportData.parsed.nguon_doc === 'pdf-text-layer' ? 'PDF gốc' : 'OCR (kiểm tra kỹ)'}</div>
-              {(docImportData.parsed.ten_doanh_nghiep || docImportData.parsed.ten_thuong_nhan || docImportData.parsed.ho_ten) && (
-                <div className="col-span-2"><span className="text-[var(--color-text-muted)]">Tên:</span> {docImportData.parsed.ten_doanh_nghiep || docImportData.parsed.ten_thuong_nhan || docImportData.parsed.ho_ten}</div>
-              )}
-              {docImportData.parsed.ma_so_thue && (
-                <div><span className="text-[var(--color-text-muted)]">MST:</span> {docImportData.parsed.ma_so_thue}</div>
-              )}
-              {docImportData.parsed.so_cccd && (
-                <div><span className="text-[var(--color-text-muted)]">Số CCCD:</span> {docImportData.parsed.so_cccd}</div>
-              )}
-            </div>
+                  <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs p-3 rounded-lg bg-black/[0.02]">
+                    <div><span className="text-[var(--color-text-muted)]">Loại giấy tờ:</span> {LOAI_GIAY_TO_LABELS[item.parsed.loai_giay_to] || '—'}</div>
+                    <div><span className="text-[var(--color-text-muted)]">Nguồn đọc:</span> {item.parsed.nguon_doc === 'pdf-text-layer' ? 'PDF gốc' : 'OCR (kiểm tra kỹ)'}</div>
+                    {(item.parsed.ten_doanh_nghiep || item.parsed.ten_thuong_nhan || item.parsed.ho_ten) && (
+                      <div className="col-span-2"><span className="text-[var(--color-text-muted)]">Tên:</span> {item.parsed.ten_doanh_nghiep || item.parsed.ten_thuong_nhan || item.parsed.ho_ten}</div>
+                    )}
+                    {item.parsed.ma_so_thue && (
+                      <div><span className="text-[var(--color-text-muted)]">MST:</span> {item.parsed.ma_so_thue}</div>
+                    )}
+                    {item.parsed.so_cccd && (
+                      <div><span className="text-[var(--color-text-muted)]">Số CCCD:</span> {item.parsed.so_cccd}</div>
+                    )}
+                  </div>
 
-            <div className="flex gap-4 text-sm">
-              <label className="flex items-center gap-1.5">
-                <input
-                  type="radio"
-                  checked={docKhachHangMode === 'existing'}
-                  onChange={() => setDocKhachHangMode('existing')}
-                />
-                Đính kèm vào khách hàng có sẵn
-              </label>
-              <label className="flex items-center gap-1.5">
-                <input
-                  type="radio"
-                  checked={docKhachHangMode === 'new'}
-                  onChange={() => setDocKhachHangMode('new')}
-                />
-                Tạo khách hàng mới từ giấy tờ này
-              </label>
-            </div>
+                  <div className="flex gap-4 text-sm">
+                    <label className="flex items-center gap-1.5">
+                      <input
+                        type="radio"
+                        checked={item.mode === 'existing'}
+                        onChange={() => updateQueueItem(item.key, { mode: 'existing' })}
+                      />
+                      Khách hàng có sẵn
+                    </label>
+                    <label className="flex items-center gap-1.5">
+                      <input
+                        type="radio"
+                        checked={item.mode === 'new'}
+                        onChange={() => updateQueueItem(item.key, { mode: 'new' })}
+                      />
+                      Tạo khách hàng mới
+                    </label>
+                  </div>
 
-            {docKhachHangMode === 'existing' ? (
-              <Select
-                label="Khách hàng *"
-                required
-                value={docImportData.khach_hang_id}
-                onChange={(e) => setDocImportData({ ...docImportData, khach_hang_id: e.target.value })}
-              >
-                <option value="">— Chọn khách hàng —</option>
-                {list.map((kh) => (
-                  <option key={kh.id} value={kh.id}>{kh.ten_khach_hang}</option>
-                ))}
-              </Select>
-            ) : (
-              <div className="grid grid-cols-2 gap-4">
-                <Input
-                  label="Tên khách hàng *"
-                  required
-                  className="col-span-2"
-                  value={docNewKhachHang.ten_khach_hang}
-                  onChange={(e) => setDocNewKhachHang({ ...docNewKhachHang, ten_khach_hang: e.target.value })}
-                />
-                <Select
-                  label="Phân loại"
-                  value={docNewKhachHang.phan_loai}
-                  onChange={(e) => setDocNewKhachHang({ ...docNewKhachHang, phan_loai: e.target.value })}
-                >
-                  {Object.entries(PHAN_LOAI_LABELS).map(([k, v]) => (
-                    <option key={k} value={k}>{v} ({k})</option>
-                  ))}
-                </Select>
-                <Input
-                  label="Mã số thuế"
-                  value={docNewKhachHang.ma_so_thue}
-                  onChange={(e) => setDocNewKhachHang({ ...docNewKhachHang, ma_so_thue: e.target.value })}
-                />
-                <Input
-                  label="Địa chỉ"
-                  className="col-span-2"
-                  value={docNewKhachHang.dia_chi}
-                  onChange={(e) => setDocNewKhachHang({ ...docNewKhachHang, dia_chi: e.target.value })}
-                />
-                <Input
-                  label="Số điện thoại"
-                  value={docNewKhachHang.so_dien_thoai}
-                  onChange={(e) => setDocNewKhachHang({ ...docNewKhachHang, so_dien_thoai: e.target.value })}
-                />
-              </div>
-            )}
+                  {item.mode === 'existing' ? (
+                    <Select
+                      label="Khách hàng *"
+                      required
+                      value={item.khach_hang_id}
+                      onChange={(e) => updateQueueItem(item.key, { khach_hang_id: e.target.value })}
+                    >
+                      <option value="">— Chọn khách hàng —</option>
+                      {list.map((kh) => (
+                        <option key={kh.id} value={kh.id}>{kh.ten_khach_hang}</option>
+                      ))}
+                    </Select>
+                  ) : (
+                    <div className="grid grid-cols-2 gap-4">
+                      <Input
+                        label="Tên khách hàng *"
+                        required
+                        className="col-span-2"
+                        value={item.newForm.ten_khach_hang}
+                        onChange={(e) => updateQueueItemNewForm(item.key, { ten_khach_hang: e.target.value })}
+                      />
+                      <Select
+                        label="Phân loại"
+                        value={item.newForm.phan_loai}
+                        onChange={(e) => updateQueueItemNewForm(item.key, { phan_loai: e.target.value })}
+                      >
+                        {Object.entries(PHAN_LOAI_LABELS).map(([k, v]) => (
+                          <option key={k} value={k}>{v} ({k})</option>
+                        ))}
+                      </Select>
+                      <Input
+                        label="Mã số thuế"
+                        value={item.newForm.ma_so_thue}
+                        onChange={(e) => updateQueueItemNewForm(item.key, { ma_so_thue: e.target.value })}
+                      />
+                      <Input
+                        label="Địa chỉ"
+                        className="col-span-2"
+                        value={item.newForm.dia_chi}
+                        onChange={(e) => updateQueueItemNewForm(item.key, { dia_chi: e.target.value })}
+                      />
+                      <Input
+                        label="Số điện thoại"
+                        value={item.newForm.so_dien_thoai}
+                        onChange={(e) => updateQueueItemNewForm(item.key, { so_dien_thoai: e.target.value })}
+                      />
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
 
             <p className="text-xs text-[var(--color-text-muted)]">
-              {docImportData.parsed.nguon_doc === 'pdf-text-layer'
-                ? 'Đọc trực tiếp từ PDF gốc — độ chính xác cao.'
-                : 'Đọc bằng OCR từ ảnh/PDF scan — kiểm tra lại thông tin trước khi đính kèm, đặc biệt nếu ảnh mờ hoặc nghiêng.'}
+              File đọc bằng OCR (không phải "PDF gốc") có thể sai sót — kiểm tra kỹ tên/MST trước khi lưu, đặc biệt nếu ảnh mờ hoặc nghiêng.
             </p>
 
             <div className="flex justify-end gap-2 pt-2">
-              <Button type="button" variant="ghost" onClick={() => setDocImportOpen(false)}>Huỷ</Button>
+              <Button type="button" variant="ghost" onClick={() => setDocImportOpen(false)}>Huỷ tất cả</Button>
               <Button type="submit" variant="amber" disabled={saving}>
-                {saving ? 'Đang lưu...' : docKhachHangMode === 'new' ? 'Tạo khách hàng & đính kèm' : 'Đính kèm'}
+                {saving ? 'Đang lưu...' : `Lưu ${docQueue.length} file`}
               </Button>
             </div>
           </form>
