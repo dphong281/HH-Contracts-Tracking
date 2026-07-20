@@ -4,7 +4,7 @@ import Layout from './components/Layout'
 import Login from './pages/Login'
 import Dashboard from './pages/Dashboard'
 import KhachHang from './pages/KhachHang'
-import KhachHangDetail from './pages/Khachhangdetail'
+import KhachHangDetail from './pages/KhachHangDetail'
 import NhanVien from './pages/NhanVien'
 import HopDong from './pages/HopDong'
 import HopDongDetail from './pages/HopDongDetail'
@@ -34,7 +34,7 @@ export default function App() {
         <Route path="/hop-dong" element={<HopDong />} />
         <Route path="/hop-dong/:id" element={<HopDongDetail />} />
         <Route path="/khach-hang" element={<KhachHang />} />
-        <Route path="/khach-hang/:id" element={<Khachhangdetail />} />
+        <Route path="/khach-hang/:id" element={<KhachHangDetail />} />
         <Route path="/cong-no" element={<CongNo />} />
         <Route path="/nhan-vien" element={<NhanVien />} />
         <Route path="/nhat-ky" element={<NhatKy />} />
