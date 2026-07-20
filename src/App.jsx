@@ -34,7 +34,7 @@ export default function App() {
         <Route path="/hop-dong" element={<HopDong />} />
         <Route path="/hop-dong/:id" element={<HopDongDetail />} />
         <Route path="/khach-hang" element={<KhachHang />} />
-        <Route path="/khach-hang/:id" element={<KhachHangDetail />} />
+        <Route path="/khach-hang/:id" element={<Khachhangdetail />} />
         <Route path="/cong-no" element={<CongNo />} />
         <Route path="/nhan-vien" element={<NhanVien />} />
         <Route path="/nhat-ky" element={<NhatKy />} />
