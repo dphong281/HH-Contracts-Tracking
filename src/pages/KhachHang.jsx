@@ -1,13 +1,19 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import {
   getKhachHangList,
   createKhachHang,
   updateKhachHang,
   deleteKhachHang,
+  getTaiLieuByKhachHang,
+  uploadTaiLieuKhachHang,
+  getTaiLieuSignedUrl,
+  deleteTaiLieuKhachHang,
   ConflictError,
 } from '../lib/queries'
 import { PHAN_LOAI_LABELS } from '../lib/format'
 import { useRealtimeRefresh } from '../lib/useRealtime'
+import { extractAndParseDocument } from '../lib/documentImport'
+import { normalizeVN } from '../lib/wordImport'
 import {
   Card,
   Button,
@@ -20,6 +26,13 @@ import {
   LoadingState,
   ErrorState,
 } from '../components/ui'
+
+const LOAI_GIAY_TO_LABELS = {
+  cccd: 'CCCD/CMND',
+  dkkd: 'Giấy ĐKKD/hộ kinh doanh',
+  giay_phep_xang_dau: 'Giấy phép KD xăng dầu',
+  khac: 'Khác',
+}
 
 const EMPTY_FORM = {
   ten_khach_hang: '',
@@ -39,6 +52,8 @@ const PHAN_LOAI_COLORS = {
 }
 
 export default function KhachHang() {
+  const docInputRef = useRef(null)
+
   const [list, setList] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
@@ -48,6 +63,19 @@ export default function KhachHang() {
   const [editing, setEditing] = useState(null)
   const [form, setForm] = useState(EMPTY_FORM)
   const [saving, setSaving] = useState(false)
+
+  // Giấy tờ đính kèm của khách hàng đang sửa
+  const [taiLieus, setTaiLieus] = useState([])
+  const [taiLieusLoading, setTaiLieusLoading] = useState(false)
+
+  // Nhập giấy tờ (PDF/ảnh) — đọc & tự so khớp khách hàng
+  const [importingDoc, setImportingDoc] = useState(false)
+  const [importProgress, setImportProgress] = useState(0)
+  const [docImportError, setDocImportError] = useState(null)
+  const [docImportOpen, setDocImportOpen] = useState(false)
+  const [docImportData, setDocImportData] = useState(null) // { file, parsed, khach_hang_id }
+  const [docKhachHangMode, setDocKhachHangMode] = useState('existing') // 'existing' | 'new'
+  const [docNewKhachHang, setDocNewKhachHang] = useState(EMPTY_FORM)
 
   useEffect(() => {
     load()
@@ -66,13 +94,34 @@ export default function KhachHang() {
   function openAdd() {
     setEditing(null)
     setForm(EMPTY_FORM)
+    setTaiLieus([])
     setModalOpen(true)
   }
 
-  function openEdit(kh) {
+  async function openEdit(kh) {
     setEditing(kh)
     setForm({ ...EMPTY_FORM, ...kh })
     setModalOpen(true)
+    setTaiLieusLoading(true)
+    const { data } = await getTaiLieuByKhachHang(kh.id)
+    setTaiLieus(data || [])
+    setTaiLieusLoading(false)
+  }
+
+  async function handleViewTaiLieu(tl) {
+    const { data, error } = await getTaiLieuSignedUrl(tl.storage_path)
+    if (error || !data?.signedUrl) {
+      alert('Không mở được file: ' + (error?.message || 'lỗi không xác định'))
+      return
+    }
+    window.open(data.signedUrl, '_blank')
+  }
+
+  async function handleDeleteTaiLieu(tl) {
+    if (!confirm(`Xoá file "${tl.ten_file}"?`)) return
+    const { error } = await deleteTaiLieuKhachHang(tl.id, tl.storage_path)
+    if (error) { alert('Lỗi xoá file: ' + error.message); return }
+    setTaiLieus((prev) => prev.filter((t) => t.id !== tl.id))
   }
 
   async function handleSave(e) {
@@ -113,6 +162,102 @@ export default function KhachHang() {
     load()
   }
 
+  // ---------- NHẬP GIẤY TỜ (PDF/ảnh) — tự đọc & so khớp đúng khách hàng ----------
+  function openDocPicker() {
+    setDocImportError(null)
+    docInputRef.current?.click()
+  }
+
+  async function handleDocFileSelected(e) {
+    const file = e.target.files?.[0]
+    e.target.value = ''
+    if (!file) return
+
+    setImportingDoc(true)
+    setImportProgress(0)
+    setDocImportError(null)
+    try {
+      const parsed = await extractAndParseDocument(file, (p) => setImportProgress(Math.round(p * 100)))
+
+      const candidateName = parsed.ten_doanh_nghiep || parsed.ten_thuong_nhan || parsed.ho_ten || ''
+      const candidateMst = (parsed.ma_so_thue || '').replace(/\s/g, '')
+
+      let match = null
+      if (candidateMst) {
+        match = list.find((kh) => kh.ma_so_thue && kh.ma_so_thue.replace(/\s/g, '') === candidateMst)
+      }
+      if (!match && candidateName) {
+        const norm = normalizeVN(candidateName)
+        match = list.find((kh) => normalizeVN(kh.ten_khach_hang) === norm)
+      }
+
+      if (!match) {
+        setDocImportError(
+          `Không tự tìm được khách hàng khớp (tên/MST đọc được: "${candidateName || '—'}" / "${parsed.ma_so_thue || '—'}"). Chọn khách hàng thủ công bên dưới.`
+        )
+      }
+
+      setDocImportData({ file, parsed, khach_hang_id: match ? match.id : '' })
+      setDocKhachHangMode(match ? 'existing' : 'new')
+      setDocNewKhachHang({
+        ...EMPTY_FORM,
+        ten_khach_hang: candidateName,
+        ma_so_thue: parsed.ma_so_thue || '',
+        dia_chi: parsed.dia_chi_tru_so || parsed.dia_diem_kd || parsed.noi_thuong_tru || '',
+      })
+      setDocImportOpen(true)
+    } catch (err) {
+      setDocImportError('Không đọc được file: ' + err.message)
+    } finally {
+      setImportingDoc(false)
+      setImportProgress(0)
+    }
+  }
+
+  async function handleConfirmDocImport(e) {
+    e.preventDefault()
+    let khachHangId = docImportData.khach_hang_id
+
+    setSaving(true)
+
+    if (docKhachHangMode === 'new') {
+      if (!docNewKhachHang.ten_khach_hang) {
+        alert('Cần có tên khách hàng để tạo mới.')
+        setSaving(false)
+        return
+      }
+      const { data: khData, error: khError } = await createKhachHang({
+        ten_khach_hang: docNewKhachHang.ten_khach_hang,
+        phan_loai: docNewKhachHang.phan_loai,
+        dia_chi: docNewKhachHang.dia_chi || null,
+        so_dien_thoai: docNewKhachHang.so_dien_thoai || null,
+        email: docNewKhachHang.email || null,
+        ma_so_thue: docNewKhachHang.ma_so_thue || null,
+        ghi_chu: docNewKhachHang.ghi_chu || null,
+      })
+      if (khError) { alert('Lỗi tạo khách hàng: ' + khError.message); setSaving(false); return }
+      khachHangId = khData.id
+    }
+
+    if (!khachHangId) {
+      alert('Cần chọn khách hàng có sẵn hoặc tạo khách hàng mới để đính kèm file.')
+      setSaving(false)
+      return
+    }
+
+    const { error } = await uploadTaiLieuKhachHang(khachHangId, docImportData.file, docImportData.parsed.loai_giay_to)
+    setSaving(false)
+    if (error) { alert('Lỗi lưu file: ' + error.message); return }
+    setDocImportOpen(false)
+    setDocImportData(null)
+    load()
+    // Nếu đang mở đúng khách hàng vừa đính kèm, làm mới luôn danh sách giấy tờ trong modal.
+    if (editing?.id === khachHangId) {
+      const { data } = await getTaiLieuByKhachHang(khachHangId)
+      setTaiLieus(data || [])
+    }
+  }
+
   const filtered = list.filter((kh) => {
     const matchSearch = kh.ten_khach_hang?.toLowerCase().includes(search.toLowerCase())
     const matchLoai = filterLoai === 'all' || kh.phan_loai === filterLoai
@@ -128,8 +273,24 @@ export default function KhachHang() {
             Danh sách khách hàng ký hợp đồng đầu ra
           </p>
         </div>
-        <Button variant="amber" onClick={openAdd}>+ Thêm khách hàng</Button>
+        <div className="flex gap-2">
+          <input
+            ref={docInputRef}
+            type="file"
+            accept=".pdf,.png,.jpg,.jpeg,.webp"
+            className="hidden"
+            onChange={handleDocFileSelected}
+          />
+          <Button variant="ghost" onClick={openDocPicker} disabled={importingDoc}>
+            {importingDoc ? `Đang đọc file... ${importProgress}%` : '📄 Nhập giấy tờ'}
+          </Button>
+          <Button variant="amber" onClick={openAdd}>+ Thêm khách hàng</Button>
+        </div>
       </div>
+
+      {docImportError && (
+        <div className="mb-4"><ErrorState message={docImportError} /></div>
+      )}
 
       <div className="flex gap-3 mb-4">
         <input
@@ -248,6 +409,48 @@ export default function KhachHang() {
             value={form.ghi_chu || ''}
             onChange={(e) => setForm({ ...form, ghi_chu: e.target.value })}
           />
+
+          {editing && (
+            <div>
+              <p className="text-xs font-medium text-[var(--color-text-muted)] uppercase tracking-wide mb-2">
+                Giấy tờ đính kèm
+              </p>
+              {taiLieusLoading ? (
+                <LoadingState />
+              ) : taiLieus.length === 0 ? (
+                <p className="text-xs text-[var(--color-text-muted)]">
+                  Chưa có giấy tờ nào. Dùng nút "📄 Nhập giấy tờ" ở trang danh sách để đính kèm.
+                </p>
+              ) : (
+                <ul className="divide-y divide-[var(--color-line)] border border-[var(--color-line)] rounded-lg">
+                  {taiLieus.map((tl) => (
+                    <li key={tl.id} className="px-3 py-2 flex items-center justify-between gap-3 text-sm">
+                      <button
+                        type="button"
+                        onClick={() => handleViewTaiLieu(tl)}
+                        className="text-left text-[var(--color-ink)] hover:underline truncate"
+                      >
+                        {tl.ten_file}
+                        {tl.loai_giay_to && (
+                          <span className="text-xs text-[var(--color-text-muted)] ml-1.5">
+                            ({LOAI_GIAY_TO_LABELS[tl.loai_giay_to] || tl.loai_giay_to})
+                          </span>
+                        )}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleDeleteTaiLieu(tl)}
+                        className="text-xs text-[var(--color-danger)] hover:underline shrink-0"
+                      >
+                        Xoá
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          )}
+
           <div className="flex justify-end gap-2 pt-2">
             <Button type="button" variant="ghost" onClick={() => setModalOpen(false)}>Huỷ</Button>
             <Button type="submit" variant="amber" disabled={saving}>
@@ -255,6 +458,113 @@ export default function KhachHang() {
             </Button>
           </div>
         </form>
+      </Modal>
+
+      {/* Modal xác nhận đính kèm giấy tờ vừa đọc */}
+      <Modal open={docImportOpen} onClose={() => setDocImportOpen(false)} title="Xác nhận đính kèm giấy tờ">
+        {docImportData && (
+          <form onSubmit={handleConfirmDocImport} className="space-y-4">
+            <div className="text-sm">
+              <div className="text-xs text-[var(--color-text-muted)] mb-1">File</div>
+              {docImportData.file.name}
+            </div>
+
+            <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs p-3 rounded-lg bg-black/[0.02]">
+              <div><span className="text-[var(--color-text-muted)]">Loại giấy tờ:</span> {LOAI_GIAY_TO_LABELS[docImportData.parsed.loai_giay_to] || '—'}</div>
+              <div><span className="text-[var(--color-text-muted)]">Nguồn đọc:</span> {docImportData.parsed.nguon_doc === 'pdf-text-layer' ? 'PDF gốc' : 'OCR (kiểm tra kỹ)'}</div>
+              {(docImportData.parsed.ten_doanh_nghiep || docImportData.parsed.ten_thuong_nhan || docImportData.parsed.ho_ten) && (
+                <div className="col-span-2"><span className="text-[var(--color-text-muted)]">Tên:</span> {docImportData.parsed.ten_doanh_nghiep || docImportData.parsed.ten_thuong_nhan || docImportData.parsed.ho_ten}</div>
+              )}
+              {docImportData.parsed.ma_so_thue && (
+                <div><span className="text-[var(--color-text-muted)]">MST:</span> {docImportData.parsed.ma_so_thue}</div>
+              )}
+              {docImportData.parsed.so_cccd && (
+                <div><span className="text-[var(--color-text-muted)]">Số CCCD:</span> {docImportData.parsed.so_cccd}</div>
+              )}
+            </div>
+
+            <div className="flex gap-4 text-sm">
+              <label className="flex items-center gap-1.5">
+                <input
+                  type="radio"
+                  checked={docKhachHangMode === 'existing'}
+                  onChange={() => setDocKhachHangMode('existing')}
+                />
+                Đính kèm vào khách hàng có sẵn
+              </label>
+              <label className="flex items-center gap-1.5">
+                <input
+                  type="radio"
+                  checked={docKhachHangMode === 'new'}
+                  onChange={() => setDocKhachHangMode('new')}
+                />
+                Tạo khách hàng mới từ giấy tờ này
+              </label>
+            </div>
+
+            {docKhachHangMode === 'existing' ? (
+              <Select
+                label="Khách hàng *"
+                required
+                value={docImportData.khach_hang_id}
+                onChange={(e) => setDocImportData({ ...docImportData, khach_hang_id: e.target.value })}
+              >
+                <option value="">— Chọn khách hàng —</option>
+                {list.map((kh) => (
+                  <option key={kh.id} value={kh.id}>{kh.ten_khach_hang}</option>
+                ))}
+              </Select>
+            ) : (
+              <div className="grid grid-cols-2 gap-4">
+                <Input
+                  label="Tên khách hàng *"
+                  required
+                  className="col-span-2"
+                  value={docNewKhachHang.ten_khach_hang}
+                  onChange={(e) => setDocNewKhachHang({ ...docNewKhachHang, ten_khach_hang: e.target.value })}
+                />
+                <Select
+                  label="Phân loại"
+                  value={docNewKhachHang.phan_loai}
+                  onChange={(e) => setDocNewKhachHang({ ...docNewKhachHang, phan_loai: e.target.value })}
+                >
+                  {Object.entries(PHAN_LOAI_LABELS).map(([k, v]) => (
+                    <option key={k} value={k}>{v} ({k})</option>
+                  ))}
+                </Select>
+                <Input
+                  label="Mã số thuế"
+                  value={docNewKhachHang.ma_so_thue}
+                  onChange={(e) => setDocNewKhachHang({ ...docNewKhachHang, ma_so_thue: e.target.value })}
+                />
+                <Input
+                  label="Địa chỉ"
+                  className="col-span-2"
+                  value={docNewKhachHang.dia_chi}
+                  onChange={(e) => setDocNewKhachHang({ ...docNewKhachHang, dia_chi: e.target.value })}
+                />
+                <Input
+                  label="Số điện thoại"
+                  value={docNewKhachHang.so_dien_thoai}
+                  onChange={(e) => setDocNewKhachHang({ ...docNewKhachHang, so_dien_thoai: e.target.value })}
+                />
+              </div>
+            )}
+
+            <p className="text-xs text-[var(--color-text-muted)]">
+              {docImportData.parsed.nguon_doc === 'pdf-text-layer'
+                ? 'Đọc trực tiếp từ PDF gốc — độ chính xác cao.'
+                : 'Đọc bằng OCR từ ảnh/PDF scan — kiểm tra lại thông tin trước khi đính kèm, đặc biệt nếu ảnh mờ hoặc nghiêng.'}
+            </p>
+
+            <div className="flex justify-end gap-2 pt-2">
+              <Button type="button" variant="ghost" onClick={() => setDocImportOpen(false)}>Huỷ</Button>
+              <Button type="submit" variant="amber" disabled={saving}>
+                {saving ? 'Đang lưu...' : docKhachHangMode === 'new' ? 'Tạo khách hàng & đính kèm' : 'Đính kèm'}
+              </Button>
+            </div>
+          </form>
+        )}
       </Modal>
     </div>
   )

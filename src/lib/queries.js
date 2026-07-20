@@ -50,6 +50,51 @@ export async function deleteKhachHang(id) {
   return supabase.from('khach_hang').delete().eq('id', id)
 }
 
+// ---------- TÀI LIỆU KHÁCH HÀNG (giấy tờ đính kèm: CCCD, ĐKKD, giấy phép KD xăng dầu...) ----------
+// File thật lưu trong Storage bucket 'tai-lieu-kh' (private), bảng này chỉ lưu đường dẫn.
+const TAI_LIEU_KH_BUCKET = 'tai-lieu-kh'
+
+export async function getTaiLieuByKhachHang(khachHangId) {
+  return supabase
+    .from('tai_lieu_khach_hang')
+    .select('*')
+    .eq('khach_hang_id', khachHangId)
+    .order('created_at', { ascending: false })
+}
+
+// Upload file lên Storage rồi ghi 1 dòng vào bảng tai_lieu_khach_hang.
+// loaiGiayTo: 'cccd' | 'dkkd' | 'giay_phep_xang_dau' | 'khac' | null (nhập tay không rõ loại)
+export async function uploadTaiLieuKhachHang(khachHangId, file, loaiGiayTo) {
+  const ext = file.name.split('.').pop()
+  const rand = typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).slice(2)
+  const path = `${khachHangId}/${Date.now()}-${rand}.${ext}`
+
+  const { error: upErr } = await supabase.storage.from(TAI_LIEU_KH_BUCKET).upload(path, file)
+  if (upErr) return { data: null, error: upErr }
+
+  const res = await supabase
+    .from('tai_lieu_khach_hang')
+    .insert({ khach_hang_id: khachHangId, ten_file: file.name, loai_giay_to: loaiGiayTo || null, storage_path: path })
+    .select()
+    .single()
+
+  if (res.error) {
+    // Rollback file đã upload nếu ghi DB thất bại, tránh rác trong bucket.
+    await supabase.storage.from(TAI_LIEU_KH_BUCKET).remove([path])
+  }
+  return res
+}
+
+// Link tạm (1 giờ) để xem/tải file — bucket private nên không có URL public trực tiếp.
+export async function getTaiLieuSignedUrl(storagePath) {
+  return supabase.storage.from(TAI_LIEU_KH_BUCKET).createSignedUrl(storagePath, 3600)
+}
+
+export async function deleteTaiLieuKhachHang(id, storagePath) {
+  await supabase.storage.from(TAI_LIEU_KH_BUCKET).remove([storagePath])
+  return supabase.from('tai_lieu_khach_hang').delete().eq('id', id)
+}
+
 // ---------- NHÂN VIÊN ----------
 export async function getNhanVienList() {
   const res = await supabase.from('nhan_vien').select('*').order('created_at', { ascending: false })

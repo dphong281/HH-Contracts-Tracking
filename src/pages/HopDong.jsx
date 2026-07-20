@@ -123,6 +123,31 @@ export default function HopDong() {
         khach_hang_id_existing: match ? match.id : '',
         ghi_chu: '',
         ghi_chu_hop_dong: `Nhập tự động từ file Word: ${file.name}`,
+        // Thông tin phụ trích xuất từ file — chỉ để xem/lưu kèm, không có ô nhập riêng.
+        // Được lưu nguyên vào cột jsonb `chi_tiet_import` của hop_dong_dau_ra.
+        chi_tiet_import: {
+          loai_hop_dong: parsed.loai_hop_dong,
+          ngay_ky: parsed.ngay_ky,
+          dia_diem_ky: parsed.dia_diem_ky,
+          so_trang: parsed.so_trang,
+          so_ban: parsed.so_ban,
+          ben_b: {
+            fax: parsed.fax,
+            tai_khoan: parsed.tai_khoan,
+            dai_dien: parsed.dai_dien,
+            chuc_vu: parsed.chuc_vu,
+          },
+          san_luong_cam_ket: parsed.san_luong_cam_ket,
+          cong_thuc_gia: parsed.cong_thuc_gia,
+          chiet_khau: parsed.chiet_khau,
+          hinh_thuc_mua_ban: parsed.hinh_thuc_mua_ban,
+          hinh_thuc_thanh_toan: parsed.hinh_thuc_thanh_toan,
+          dat_coc_ky_quy: parsed.dat_coc_ky_quy,
+          thoi_han_doi_chieu_cong_no: parsed.thoi_han_doi_chieu_cong_no,
+          dieu_kien_don_phuong_cham_dut: parsed.dieu_kien_don_phuong_cham_dut,
+          nghia_vu_treo_logo: parsed.nghia_vu_treo_logo,
+          gia_han_tu_dong: parsed.gia_han_tu_dong,
+        },
       })
       setImportOpen(true)
     } catch (err) {
@@ -176,6 +201,7 @@ export default function HopDong() {
         trang_thai: 'dang_hieu_luc',
         ghi_chu: importData.ghi_chu || null,
         ghi_chu_hop_dong: importData.ghi_chu_hop_dong || null,
+        chi_tiet_import: importData.chi_tiet_import || null,
       })
       setSaving(false)
       if (error) { alert('Lỗi lưu hợp đồng: ' + error.message); return }
@@ -530,6 +556,101 @@ export default function HopDong() {
                 onChange={(e) => setImportData({ ...importData, ghi_chu_hop_dong: e.target.value })}
               />
             </div>
+
+            {importData.chi_tiet_import && (
+              <div>
+                <p className="text-xs font-medium text-[var(--color-text-muted)] uppercase tracking-wide mb-2">
+                  Thông tin khác trích xuất từ file (sẽ lưu kèm hợp đồng)
+                </p>
+                <div className="rounded-lg border border-[var(--color-line)] p-4 space-y-3 text-sm">
+                  <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs">
+                    {importData.chi_tiet_import.loai_hop_dong && (
+                      <div><span className="text-[var(--color-text-muted)]">Loại HĐ:</span> {importData.chi_tiet_import.loai_hop_dong}</div>
+                    )}
+                    {importData.chi_tiet_import.ngay_ky && (
+                      <div><span className="text-[var(--color-text-muted)]">Ngày ký:</span> {formatDate(importData.chi_tiet_import.ngay_ky)}</div>
+                    )}
+                    {importData.chi_tiet_import.dia_diem_ky && (
+                      <div><span className="text-[var(--color-text-muted)]">Nơi ký:</span> {importData.chi_tiet_import.dia_diem_ky}</div>
+                    )}
+                    {(importData.chi_tiet_import.so_trang || importData.chi_tiet_import.so_ban) && (
+                      <div><span className="text-[var(--color-text-muted)]">Số trang / số bản:</span> {importData.chi_tiet_import.so_trang || '—'} / {importData.chi_tiet_import.so_ban || '—'}</div>
+                    )}
+                    {importData.chi_tiet_import.ben_b?.dai_dien && (
+                      <div><span className="text-[var(--color-text-muted)]">Đại diện Bên B:</span> {importData.chi_tiet_import.ben_b.dai_dien}{importData.chi_tiet_import.ben_b.chuc_vu ? ` (${importData.chi_tiet_import.ben_b.chuc_vu})` : ''}</div>
+                    )}
+                    {importData.chi_tiet_import.ben_b?.fax && (
+                      <div><span className="text-[var(--color-text-muted)]">Fax:</span> {importData.chi_tiet_import.ben_b.fax}</div>
+                    )}
+                    {importData.chi_tiet_import.ben_b?.tai_khoan?.length > 0 && (
+                      <div className="col-span-2"><span className="text-[var(--color-text-muted)]">Số TK:</span> {importData.chi_tiet_import.ben_b.tai_khoan.join(' · ')}</div>
+                    )}
+                  </div>
+
+                  {importData.chi_tiet_import.san_luong_cam_ket?.length > 0 && (
+                    <div>
+                      <div className="text-xs text-[var(--color-text-muted)] mb-1">Sản lượng cam kết</div>
+                      <table className="w-full text-xs">
+                        <tbody>
+                          {importData.chi_tiet_import.san_luong_cam_ket.map((sl, i) => (
+                            <tr key={i} className="border-t border-[var(--color-line)] first:border-0">
+                              <td className="py-1 pr-2">{sl.ten_hang}</td>
+                              <td className="py-1 text-right font-medium">{sl.so_luong} {sl.don_vi}/tháng</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+
+                  {(importData.chi_tiet_import.cong_thuc_gia || importData.chi_tiet_import.chiet_khau) && (
+                    <div className="text-xs">
+                      <span className="text-[var(--color-text-muted)]">Giá & chiết khấu:</span>{' '}
+                      {importData.chi_tiet_import.cong_thuc_gia}
+                      {importData.chi_tiet_import.chiet_khau && ` — Chiết khấu: ${importData.chi_tiet_import.chiet_khau}`}
+                    </div>
+                  )}
+
+                  {(importData.chi_tiet_import.hinh_thuc_mua_ban?.length > 0 || importData.chi_tiet_import.hinh_thuc_thanh_toan?.length > 0) && (
+                    <div className="text-xs">
+                      {importData.chi_tiet_import.hinh_thuc_mua_ban?.length > 0 && (
+                        <div><span className="text-[var(--color-text-muted)]">Hình thức mua bán:</span> {importData.chi_tiet_import.hinh_thuc_mua_ban.join(', ')}</div>
+                      )}
+                      {importData.chi_tiet_import.hinh_thuc_thanh_toan?.length > 0 && (
+                        <div><span className="text-[var(--color-text-muted)]">Hình thức thanh toán:</span> {importData.chi_tiet_import.hinh_thuc_thanh_toan.join(', ')}</div>
+                      )}
+                      {importData.chi_tiet_import.dat_coc_ky_quy && (
+                        <div className="text-[var(--color-amber-dark)]">Có yêu cầu đặt cọc / ký quỹ</div>
+                      )}
+                      {importData.chi_tiet_import.thoi_han_doi_chieu_cong_no && (
+                        <div><span className="text-[var(--color-text-muted)]">Thời hạn đối chiếu công nợ:</span> {importData.chi_tiet_import.thoi_han_doi_chieu_cong_no}</div>
+                      )}
+                    </div>
+                  )}
+
+                  {(importData.chi_tiet_import.dieu_kien_don_phuong_cham_dut?.length > 0 || importData.chi_tiet_import.nghia_vu_treo_logo || importData.chi_tiet_import.gia_han_tu_dong) && (
+                    <div className="text-xs space-y-1">
+                      {importData.chi_tiet_import.gia_han_tu_dong && (
+                        <div><span className="text-[var(--color-text-muted)]">Gia hạn/thanh lý:</span> {importData.chi_tiet_import.gia_han_tu_dong}</div>
+                      )}
+                      {importData.chi_tiet_import.nghia_vu_treo_logo && (
+                        <div>Có nghĩa vụ treo logo / biển hiệu</div>
+                      )}
+                      {importData.chi_tiet_import.dieu_kien_don_phuong_cham_dut?.length > 0 && (
+                        <div>
+                          <span className="text-[var(--color-text-muted)]">Điều kiện đơn phương chấm dứt:</span>
+                          <ul className="list-disc list-inside mt-0.5">
+                            {importData.chi_tiet_import.dieu_kien_don_phuong_cham_dut.map((d, i) => (
+                              <li key={i}>{d}</li>
+                            ))}
+                          </ul>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
 
             <p className="text-xs text-[var(--color-text-muted)]">
               Dữ liệu được trích xuất tự động từ file Word, kiểm tra lại trước khi lưu — đặc biệt các trường có thể để trống nếu file không ghi rõ.

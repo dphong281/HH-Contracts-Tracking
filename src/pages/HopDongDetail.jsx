@@ -210,6 +210,95 @@ export default function HopDongDetail() {
         </Card>
       )}
 
+      {hd.chi_tiet_import && (
+        <Card className="p-5 mb-6">
+          <div className="text-xs font-medium text-[var(--color-text-muted)] uppercase tracking-wide mb-3">
+            Thông tin trích xuất từ hợp đồng
+          </div>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-x-4 gap-y-2 text-sm mb-4">
+            {hd.chi_tiet_import.loai_hop_dong && (
+              <div><div className="text-xs text-[var(--color-text-muted)]">Loại hợp đồng</div>{hd.chi_tiet_import.loai_hop_dong}</div>
+            )}
+            {hd.chi_tiet_import.ngay_ky && (
+              <div><div className="text-xs text-[var(--color-text-muted)]">Ngày ký</div>{formatDate(hd.chi_tiet_import.ngay_ky)}</div>
+            )}
+            {hd.chi_tiet_import.dia_diem_ky && (
+              <div><div className="text-xs text-[var(--color-text-muted)]">Nơi ký</div>{hd.chi_tiet_import.dia_diem_ky}</div>
+            )}
+            {(hd.chi_tiet_import.so_trang || hd.chi_tiet_import.so_ban) && (
+              <div><div className="text-xs text-[var(--color-text-muted)]">Số trang / số bản</div>{hd.chi_tiet_import.so_trang || '—'} / {hd.chi_tiet_import.so_ban || '—'}</div>
+            )}
+            {hd.chi_tiet_import.ben_b?.dai_dien && (
+              <div><div className="text-xs text-[var(--color-text-muted)]">Đại diện Bên B</div>{hd.chi_tiet_import.ben_b.dai_dien}{hd.chi_tiet_import.ben_b.chuc_vu ? ` (${hd.chi_tiet_import.ben_b.chuc_vu})` : ''}</div>
+            )}
+            {hd.chi_tiet_import.ben_b?.fax && (
+              <div><div className="text-xs text-[var(--color-text-muted)]">Fax</div>{hd.chi_tiet_import.ben_b.fax}</div>
+            )}
+            {hd.chi_tiet_import.ben_b?.tai_khoan?.length > 0 && (
+              <div className="col-span-2"><div className="text-xs text-[var(--color-text-muted)]">Số tài khoản</div>{hd.chi_tiet_import.ben_b.tai_khoan.join(' · ')}</div>
+            )}
+            {hd.chi_tiet_import.thoi_han_doi_chieu_cong_no && (
+              <div><div className="text-xs text-[var(--color-text-muted)]">Đối chiếu công nợ</div>{hd.chi_tiet_import.thoi_han_doi_chieu_cong_no}</div>
+            )}
+            {hd.chi_tiet_import.dat_coc_ky_quy && (
+              <div><div className="text-xs text-[var(--color-text-muted)]">Đặt cọc / ký quỹ</div>Có</div>
+            )}
+            {hd.chi_tiet_import.nghia_vu_treo_logo && (
+              <div><div className="text-xs text-[var(--color-text-muted)]">Treo logo/biển hiệu</div>Có</div>
+            )}
+            {hd.chi_tiet_import.gia_han_tu_dong && (
+              <div className="col-span-2"><div className="text-xs text-[var(--color-text-muted)]">Gia hạn / thanh lý</div>{hd.chi_tiet_import.gia_han_tu_dong}</div>
+            )}
+          </div>
+
+          {hd.chi_tiet_import.san_luong_cam_ket?.length > 0 && (
+            <div className="mb-4">
+              <div className="text-xs text-[var(--color-text-muted)] uppercase tracking-wide mb-1.5">Sản lượng cam kết</div>
+              <table className="w-full text-sm">
+                <tbody>
+                  {hd.chi_tiet_import.san_luong_cam_ket.map((sl, i) => (
+                    <tr key={i} className="border-t border-[var(--color-line)] first:border-0">
+                      <td className="py-1.5 pr-2">{sl.ten_hang}</td>
+                      <td className="py-1.5 text-right font-medium">{sl.so_luong} {sl.don_vi}/tháng</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+
+          {(hd.chi_tiet_import.cong_thuc_gia || hd.chi_tiet_import.chiet_khau) && (
+            <div className="mb-3 text-sm">
+              <div className="text-xs text-[var(--color-text-muted)] uppercase tracking-wide mb-1">Giá & chiết khấu</div>
+              {hd.chi_tiet_import.cong_thuc_gia}
+              {hd.chi_tiet_import.chiet_khau && ` — Chiết khấu: ${hd.chi_tiet_import.chiet_khau}`}
+            </div>
+          )}
+
+          {(hd.chi_tiet_import.hinh_thuc_mua_ban?.length > 0 || hd.chi_tiet_import.hinh_thuc_thanh_toan?.length > 0) && (
+            <div className="mb-3 text-sm space-y-1">
+              {hd.chi_tiet_import.hinh_thuc_mua_ban?.length > 0 && (
+                <div><span className="text-xs text-[var(--color-text-muted)]">Hình thức mua bán: </span>{hd.chi_tiet_import.hinh_thuc_mua_ban.join(', ')}</div>
+              )}
+              {hd.chi_tiet_import.hinh_thuc_thanh_toan?.length > 0 && (
+                <div><span className="text-xs text-[var(--color-text-muted)]">Hình thức thanh toán: </span>{hd.chi_tiet_import.hinh_thuc_thanh_toan.join(', ')}</div>
+              )}
+            </div>
+          )}
+
+          {hd.chi_tiet_import.dieu_kien_don_phuong_cham_dut?.length > 0 && (
+            <div className="text-sm">
+              <div className="text-xs text-[var(--color-text-muted)] uppercase tracking-wide mb-1">Điều kiện đơn phương chấm dứt</div>
+              <ul className="list-disc list-inside space-y-0.5">
+                {hd.chi_tiet_import.dieu_kien_don_phuong_cham_dut.map((d, i) => (
+                  <li key={i}>{d}</li>
+                ))}
+              </ul>
+            </div>
+          )}
+        </Card>
+      )}
+
       <div className="grid grid-cols-2 gap-6">
         {/* Phụ lục */}
         <Card>
