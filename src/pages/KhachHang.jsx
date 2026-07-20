@@ -12,7 +12,6 @@ import {
 } from '../lib/queries'
 import { PHAN_LOAI_LABELS } from '../lib/format'
 import { useRealtimeRefresh } from '../lib/useRealtime'
-import { extractAndParseDocument } from '../lib/documentImport'
 import { normalizeVN } from '../lib/wordImport'
 import {
   Card,
@@ -32,6 +31,45 @@ const LOAI_GIAY_TO_LABELS = {
   dkkd: 'Giấy ĐKKD/hộ kinh doanh',
   giay_phep_xang_dau: 'Giấy phép KD xăng dầu',
   khac: 'Khác',
+}
+
+// Chỉ giữ lại chữ số — so khớp MST kiểu này chịu được khác biệt do OCR đọc lẫn
+// khoảng trắng/dấu gạch/chấm ("031234 5678" vs "0312345678").
+function onlyDigits(str = '') {
+  return str.replace(/\D/g, '')
+}
+
+// Bỏ các tiền tố loại hình doanh nghiệp phổ biến trước khi so khớp tên — vì OCR/
+// tên trên giấy tờ hay ghi đầy đủ "CÔNG TY TNHH ABC" trong khi tên lưu trong app
+// có thể ghi tắt "ABC" hoặc ngược lại, nếu so khớp tuyệt đối sẽ luôn trượt.
+function coreCompanyName(name = '') {
+  return normalizeVN(name)
+    .replace(/^(cong ty|cty)\s*(tnhh|co phan|cp|hop danh|tu nhan)?\s*(mot thanh vien|1 thanh vien)?\s*/i, '')
+    .replace(/^(doanh nghiep tu nhan|dntn|ho kinh doanh|hkd)\s*/i, '')
+    .trim()
+}
+
+// So khớp 1 khách hàng trong danh sách theo MST (ưu tiên, chỉ so số) rồi tới tên
+// (so khớp tuyệt đối trước, không thấy thì so khớp "tên lõi" sau khi bỏ tiền tố
+// loại hình doanh nghiệp — chỉ nhận khi đủ dài để tránh khớp nhầm).
+function findMatchingKhachHang(list, candidateName, candidateMst) {
+  const mstDigits = onlyDigits(candidateMst)
+  if (mstDigits) {
+    const byMst = list.find((kh) => kh.ma_so_thue && onlyDigits(kh.ma_so_thue) === mstDigits)
+    if (byMst) return byMst
+  }
+  if (!candidateName) return null
+
+  const normTarget = normalizeVN(candidateName)
+  const exact = list.find((kh) => normalizeVN(kh.ten_khach_hang) === normTarget)
+  if (exact) return exact
+
+  const coreTarget = coreCompanyName(candidateName)
+  if (coreTarget.length >= 4) {
+    const byCore = list.find((kh) => coreCompanyName(kh.ten_khach_hang) === coreTarget)
+    if (byCore) return byCore
+  }
+  return null
 }
 
 const EMPTY_FORM = {
@@ -68,9 +106,7 @@ export default function KhachHang() {
   const [taiLieus, setTaiLieus] = useState([])
   const [taiLieusLoading, setTaiLieusLoading] = useState(false)
 
-  // Nhập giấy tờ (PDF/ảnh) — đọc & tự so khớp khách hàng, hỗ trợ chọn nhiều file 1 lúc
-  const [importingDoc, setImportingDoc] = useState(false)
-  const [importProgress, setImportProgress] = useState(0)
+  // Nhập giấy tờ theo thư mục — mỗi thư mục = 1 khách hàng
   const [docImportError, setDocImportError] = useState(null)
   const [docImportOpen, setDocImportOpen] = useState(false)
   const [docQueue, setDocQueue] = useState([]) // [{ key, file, parsed, khach_hang_id, mode, newForm }]
@@ -160,68 +196,62 @@ export default function KhachHang() {
     load()
   }
 
-  // ---------- NHẬP GIẤY TỜ (PDF/ảnh) — tự đọc & so khớp đúng khách hàng ----------
+  // ---------- NHẬP GIẤY TỜ THEO THƯ MỤC — tên thư mục = tên khách hàng ----------
+  // Chọn 1 thư mục cha chứa nhiều thư mục con (mỗi thư mục con là 1 khách hàng),
+  // hoặc chọn thẳng 1 thư mục của 1 khách hàng. App nhóm file theo thư mục cha
+  // trực tiếp của mỗi file, rồi so khớp TÊN THƯ MỤC với danh sách khách hàng —
+  // đáng tin hơn nhiều so với đọc OCR nội dung từng file.
   function openDocPicker() {
     setDocImportError(null)
     docInputRef.current?.click()
   }
 
-  async function handleDocFileSelected(e) {
-    const files = Array.from(e.target.files || [])
-    e.target.value = ''
-    if (files.length === 0) return
+  const DOC_EXT_RE = /\.(pdf|png|jpe?g|webp)$/i
 
-    setImportingDoc(true)
-    setImportProgress(0)
-    setDocImportError(null)
+  // Đoán loại giấy tờ từ TÊN FILE — chỉ để gợi ý, không bắt buộc đúng, người dùng
+  // sửa lại được trong modal xác nhận. Không chạy OCR nên xử lý gần như tức thì.
+  function guessLoaiGiayToFromFilename(name = '') {
+    const n = normalizeVN(name)
+    if (/cccd|cmnd|can cuoc/.test(n)) return 'cccd'
+    if (/dkkd|gcndkkd|dang ky kinh doanh|ho kinh doanh/.test(n)) return 'dkkd'
+    if (/gpkd|gpxd|giay phep/.test(n)) return 'giay_phep_xang_dau'
+    return 'khac'
+  }
+
+  async function handleDocFolderSelected(e) {
+    const allFiles = Array.from(e.target.files || [])
+    e.target.value = ''
+    if (allFiles.length === 0) return
+
+    const files = allFiles.filter((f) => DOC_EXT_RE.test(f.name))
+    const skipped = allFiles.length - files.length
+
+    // Nhóm theo thư mục cha TRỰC TIẾP của mỗi file (luôn đúng vị trí này bất kể
+    // bạn chọn thư mục gốc ở cấp nào — webkitRelativePath giữ nguyên toàn bộ đường dẫn con).
+    const groups = new Map()
+    for (const file of files) {
+      const relPath = file.webkitRelativePath || file.name
+      const parts = relPath.split('/')
+      const folderName = parts.length >= 2 ? parts[parts.length - 2] : parts[0]
+      if (!groups.has(folderName)) groups.set(folderName, [])
+      groups.get(folderName).push(file)
+    }
 
     const queue = []
-    const failed = []
-
-    for (let i = 0; i < files.length; i++) {
-      const file = files[i]
-      try {
-        const parsed = await extractAndParseDocument(file, (p) =>
-          setImportProgress(Math.round(((i + p) / files.length) * 100))
-        )
-
-        const candidateName = parsed.ten_doanh_nghiep || parsed.ten_thuong_nhan || parsed.ho_ten || ''
-        const candidateMst = (parsed.ma_so_thue || '').replace(/\s/g, '')
-
-        let match = null
-        if (candidateMst) {
-          match = list.find((kh) => kh.ma_so_thue && kh.ma_so_thue.replace(/\s/g, '') === candidateMst)
-        }
-        if (!match && candidateName) {
-          const norm = normalizeVN(candidateName)
-          match = list.find((kh) => normalizeVN(kh.ten_khach_hang) === norm)
-        }
-
-        queue.push({
-          key: `${file.name}-${i}-${Date.now()}`,
-          file,
-          parsed,
-          khach_hang_id: match ? match.id : '',
-          mode: match ? 'existing' : 'new',
-          newForm: {
-            ...EMPTY_FORM,
-            ten_khach_hang: candidateName,
-            ma_so_thue: parsed.ma_so_thue || '',
-            dia_chi: parsed.dia_chi_tru_so || parsed.dia_diem_kd || parsed.noi_thuong_tru || '',
-          },
-        })
-      } catch (err) {
-        failed.push(`${file.name}: ${err.message}`)
-      }
-      setImportProgress(Math.round(((i + 1) / files.length) * 100))
+    for (const [folderName, groupFiles] of groups.entries()) {
+      const match = findMatchingKhachHang(list, folderName, '')
+      queue.push({
+        key: `${folderName}-${Date.now()}-${Math.random()}`,
+        folderName,
+        files: groupFiles,
+        khach_hang_id: match ? match.id : '',
+        mode: match ? 'existing' : 'new',
+        newForm: { ...EMPTY_FORM, ten_khach_hang: folderName },
+      })
     }
 
-    setImportingDoc(false)
-    setImportProgress(0)
+    setDocImportError(skipped > 0 ? `Đã bỏ qua ${skipped} file không phải .pdf/.png/.jpg trong thư mục đã chọn.` : null)
 
-    if (failed.length > 0) {
-      setDocImportError(`Không đọc được ${failed.length} file — ${failed.join('; ')}`)
-    }
     if (queue.length > 0) {
       setDocQueue(queue)
       setDocImportOpen(true)
@@ -252,7 +282,7 @@ export default function KhachHang() {
 
       if (item.mode === 'new') {
         if (!item.newForm.ten_khach_hang) {
-          errors.push(`${item.file.name}: cần nhập tên khách hàng để tạo mới`)
+          errors.push(`${item.folderName}: cần nhập tên khách hàng để tạo mới`)
           continue
         }
         const { data: khData, error: khError } = await createKhachHang({
@@ -264,17 +294,19 @@ export default function KhachHang() {
           ma_so_thue: item.newForm.ma_so_thue || null,
           ghi_chu: item.newForm.ghi_chu || null,
         })
-        if (khError) { errors.push(`${item.file.name}: lỗi tạo khách hàng — ${khError.message}`); continue }
+        if (khError) { errors.push(`${item.folderName}: lỗi tạo khách hàng — ${khError.message}`); continue }
         khachHangId = khData.id
       }
 
       if (!khachHangId) {
-        errors.push(`${item.file.name}: chưa chọn khách hàng để đính kèm`)
+        errors.push(`${item.folderName}: chưa chọn khách hàng để đính kèm`)
         continue
       }
 
-      const { error } = await uploadTaiLieuKhachHang(khachHangId, item.file, item.parsed.loai_giay_to)
-      if (error) { errors.push(`${item.file.name}: lỗi lưu file — ${error.message}`); continue }
+      for (const file of item.files) {
+        const { error } = await uploadTaiLieuKhachHang(khachHangId, file, guessLoaiGiayToFromFilename(file.name))
+        if (error) errors.push(`${item.folderName}/${file.name}: lỗi lưu file — ${error.message}`)
+      }
       if (editing?.id === khachHangId) attachedToEditing = true
     }
 
@@ -290,7 +322,7 @@ export default function KhachHang() {
     }
 
     if (errors.length > 0) {
-      alert(`${errors.length} file không lưu được:\n` + errors.join('\n'))
+      alert(`Có lỗi khi lưu:\n` + errors.join('\n'))
     }
   }
 
@@ -313,13 +345,14 @@ export default function KhachHang() {
           <input
             ref={docInputRef}
             type="file"
-            accept=".pdf,.png,.jpg,.jpeg,.webp"
+            webkitdirectory=""
+            directory=""
             multiple
             className="hidden"
-            onChange={handleDocFileSelected}
+            onChange={handleDocFolderSelected}
           />
-          <Button variant="ghost" onClick={openDocPicker} disabled={importingDoc}>
-            {importingDoc ? `Đang đọc file... ${importProgress}%` : '📄 Nhập giấy tờ'}
+          <Button variant="ghost" onClick={openDocPicker}>
+            📁 Nhập giấy tờ theo thư mục
           </Button>
           <Button variant="amber" onClick={openAdd}>+ Thêm khách hàng</Button>
         </div>
@@ -498,36 +531,31 @@ export default function KhachHang() {
       </Modal>
 
       {/* Modal xác nhận đính kèm giấy tờ vừa đọc — có thể nhiều file cùng lúc */}
-      <Modal open={docImportOpen} onClose={() => setDocImportOpen(false)} title={`Xác nhận đính kèm giấy tờ (${docQueue.length} file)`} wide>
+      <Modal open={docImportOpen} onClose={() => setDocImportOpen(false)} title={`Xác nhận đính kèm giấy tờ (${docQueue.length} khách hàng)`} wide>
         {docQueue.length > 0 && (
           <form onSubmit={handleConfirmDocImport} className="space-y-4">
             <div className="space-y-4 max-h-[60vh] overflow-y-auto pr-1">
               {docQueue.map((item) => (
                 <div key={item.key} className="border border-[var(--color-line)] rounded-lg p-4 space-y-3">
                   <div className="flex items-center justify-between">
-                    <div className="text-sm font-medium text-[var(--color-ink)] truncate">{item.file.name}</div>
+                    <div className="text-sm font-medium text-[var(--color-ink)] truncate">
+                      📁 {item.folderName}
+                      <span className="text-xs text-[var(--color-text-muted)] font-normal ml-1.5">({item.files.length} file)</span>
+                    </div>
                     <button
                       type="button"
                       onClick={() => removeQueueItem(item.key)}
                       className="text-xs text-[var(--color-danger)] hover:underline shrink-0 ml-3"
                     >
-                      Bỏ qua file này
+                      Bỏ qua thư mục này
                     </button>
                   </div>
 
-                  <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs p-3 rounded-lg bg-black/[0.02]">
-                    <div><span className="text-[var(--color-text-muted)]">Loại giấy tờ:</span> {LOAI_GIAY_TO_LABELS[item.parsed.loai_giay_to] || '—'}</div>
-                    <div><span className="text-[var(--color-text-muted)]">Nguồn đọc:</span> {item.parsed.nguon_doc === 'pdf-text-layer' ? 'PDF gốc' : 'OCR (kiểm tra kỹ)'}</div>
-                    {(item.parsed.ten_doanh_nghiep || item.parsed.ten_thuong_nhan || item.parsed.ho_ten) && (
-                      <div className="col-span-2"><span className="text-[var(--color-text-muted)]">Tên:</span> {item.parsed.ten_doanh_nghiep || item.parsed.ten_thuong_nhan || item.parsed.ho_ten}</div>
-                    )}
-                    {item.parsed.ma_so_thue && (
-                      <div><span className="text-[var(--color-text-muted)]">MST:</span> {item.parsed.ma_so_thue}</div>
-                    )}
-                    {item.parsed.so_cccd && (
-                      <div><span className="text-[var(--color-text-muted)]">Số CCCD:</span> {item.parsed.so_cccd}</div>
-                    )}
-                  </div>
+                  <ul className="text-xs text-[var(--color-text-muted)] pl-1 space-y-0.5">
+                    {item.files.map((f, i) => (
+                      <li key={i} className="truncate">{f.name}</li>
+                    ))}
+                  </ul>
 
                   <div className="flex gap-4 text-sm">
                     <label className="flex items-center gap-1.5">
@@ -601,7 +629,7 @@ export default function KhachHang() {
             </div>
 
             <p className="text-xs text-[var(--color-text-muted)]">
-              File đọc bằng OCR (không phải "PDF gốc") có thể sai sót — kiểm tra kỹ tên/MST trước khi lưu, đặc biệt nếu ảnh mờ hoặc nghiêng.
+              Khách hàng được gợi ý theo tên thư mục — kiểm tra lại đúng khách hàng trước khi lưu, đặc biệt nếu nhiều khách hàng có tên gần giống nhau.
             </p>
 
             <div className="flex justify-end gap-2 pt-2">
