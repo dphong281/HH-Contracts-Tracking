@@ -153,6 +153,15 @@ export async function updateHopDong(id, payload, expectedUpdatedAt) {
   if (res.error) return res
   return { ...res, data: await decryptHopDong(res.data) }
 }
+export async function getHopDongByKhachHang(khachHangId) {
+  const res = await supabase
+    .from('hop_dong_dau_ra')
+    .select('*, nhan_vien(id, ho_ten)')
+    .eq('khach_hang_id', khachHangId)
+    .order('created_at', { ascending: false })
+  if (res.error) return res
+  return { ...res, data: await Promise.all(res.data.map(decryptHopDong)) }
+}
 export async function deleteHopDong(id) {
   return supabase.from('hop_dong_dau_ra').delete().eq('id', id)
 }
@@ -312,6 +321,31 @@ export async function createPhuLuc(payload) {
 }
 export async function deletePhuLuc(id) {
   return supabase.from('phu_luc_hop_dong').delete().eq('id', id)
+}
+
+// ---------- PHỤ LỤC — GOM THEO KHÁCH HÀNG (dùng ở trang chi tiết khách hàng) ----------
+// Phụ lục vẫn gắn với 1 hợp đồng cụ thể (bảng phu_luc_hop_dong không đổi cấu trúc) —
+// hàm này chỉ gom tất cả phụ lục của TẤT CẢ hợp đồng thuộc 1 khách hàng, kèm theo
+// số hợp đồng để hiển thị cho biết phụ lục đó thuộc hợp đồng nào.
+export async function getPhuLucByKhachHang(khachHangId) {
+  const { data: hopDongs, error: hdErr } = await supabase
+    .from('hop_dong_dau_ra')
+    .select('id, so_hop_dong')
+    .eq('khach_hang_id', khachHangId)
+  if (hdErr) return { data: null, error: hdErr }
+  if (!hopDongs || hopDongs.length === 0) return { data: [], error: null }
+
+  const ids = hopDongs.map((h) => h.id)
+  const { data: phuLucs, error: plErr } = await supabase
+    .from('phu_luc_hop_dong')
+    .select('*')
+    .in('hop_dong_id', ids)
+    .order('ngay_bat_dau', { ascending: false })
+  if (plErr) return { data: null, error: plErr }
+
+  const hopDongMap = new Map(hopDongs.map((h) => [h.id, h.so_hop_dong]))
+  const data = phuLucs.map((pl) => ({ ...pl, so_hop_dong: hopDongMap.get(pl.hop_dong_id) }))
+  return { data, error: null }
 }
 
 // ---------- THANH TOÁN ----------

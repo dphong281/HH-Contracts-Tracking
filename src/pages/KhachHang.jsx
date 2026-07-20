@@ -1,14 +1,10 @@
 import { useEffect, useRef, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import {
   getKhachHangList,
   createKhachHang,
-  updateKhachHang,
   deleteKhachHang,
-  getTaiLieuByKhachHang,
   uploadTaiLieuKhachHang,
-  getTaiLieuSignedUrl,
-  deleteTaiLieuKhachHang,
-  ConflictError,
 } from '../lib/queries'
 import { PHAN_LOAI_LABELS } from '../lib/format'
 import { useRealtimeRefresh } from '../lib/useRealtime'
@@ -25,13 +21,6 @@ import {
   LoadingState,
   ErrorState,
 } from '../components/ui'
-
-const LOAI_GIAY_TO_LABELS = {
-  cccd: 'CCCD/CMND',
-  dkkd: 'Giấy ĐKKD/hộ kinh doanh',
-  giay_phep_xang_dau: 'Giấy phép KD xăng dầu',
-  khac: 'Khác',
-}
 
 // Chỉ giữ lại chữ số — so khớp MST kiểu này chịu được khác biệt do OCR đọc lẫn
 // khoảng trắng/dấu gạch/chấm ("031234 5678" vs "0312345678").
@@ -103,6 +92,7 @@ const PHAN_LOAI_COLORS = {
 }
 
 export default function KhachHang() {
+  const navigate = useNavigate()
   const docInputRef = useRef(null)
 
   const [list, setList] = useState([])
@@ -111,13 +101,8 @@ export default function KhachHang() {
   const [search, setSearch] = useState('')
   const [filterLoai, setFilterLoai] = useState('all')
   const [modalOpen, setModalOpen] = useState(false)
-  const [editing, setEditing] = useState(null)
   const [form, setForm] = useState(EMPTY_FORM)
   const [saving, setSaving] = useState(false)
-
-  // Giấy tờ đính kèm của khách hàng đang sửa
-  const [taiLieus, setTaiLieus] = useState([])
-  const [taiLieusLoading, setTaiLieusLoading] = useState(false)
 
   // Nhập giấy tờ theo thư mục — mỗi thư mục = 1 khách hàng
   const [docImportError, setDocImportError] = useState(null)
@@ -139,59 +124,16 @@ export default function KhachHang() {
   }
 
   function openAdd() {
-    setEditing(null)
     setForm(EMPTY_FORM)
-    setTaiLieus([])
     setModalOpen(true)
-  }
-
-  async function openEdit(kh) {
-    setEditing(kh)
-    setForm({ ...EMPTY_FORM, ...kh })
-    setModalOpen(true)
-    setTaiLieusLoading(true)
-    const { data } = await getTaiLieuByKhachHang(kh.id)
-    setTaiLieus(data || [])
-    setTaiLieusLoading(false)
-  }
-
-  async function handleViewTaiLieu(tl) {
-    const { data, error } = await getTaiLieuSignedUrl(tl.storage_path)
-    if (error || !data?.signedUrl) {
-      alert('Không mở được file: ' + (error?.message || 'lỗi không xác định'))
-      return
-    }
-    window.open(data.signedUrl, '_blank')
-  }
-
-  async function handleDeleteTaiLieu(tl) {
-    if (!confirm(`Xoá file "${tl.ten_file}"?`)) return
-    const { error } = await deleteTaiLieuKhachHang(tl.id, tl.storage_path)
-    if (error) { alert('Lỗi xoá file: ' + error.message); return }
-    setTaiLieus((prev) => prev.filter((t) => t.id !== tl.id))
   }
 
   async function handleSave(e) {
     e.preventDefault()
     setSaving(true)
-    const payload = { ...form }
-    const expectedUpdatedAt = payload.updated_at
-    delete payload.id
-    delete payload.created_at
-    delete payload.updated_at
-
-    const { error } = editing
-      ? await updateKhachHang(editing.id, payload, expectedUpdatedAt)
-      : await createKhachHang(payload)
-
+    const { error } = await createKhachHang(form)
     setSaving(false)
     if (error) {
-      if (error instanceof ConflictError) {
-        alert(error.message)
-        setModalOpen(false)
-        load()
-        return
-      }
       alert('Lỗi lưu dữ liệu: ' + error.message)
       return
     }
@@ -288,7 +230,6 @@ export default function KhachHang() {
     setSaving(true)
 
     const errors = []
-    let attachedToEditing = false
 
     for (const item of docQueue) {
       let khachHangId = item.khach_hang_id
@@ -320,19 +261,12 @@ export default function KhachHang() {
         const { error } = await uploadTaiLieuKhachHang(khachHangId, file, guessLoaiGiayToFromFilename(file.name))
         if (error) errors.push(`${item.folderName}/${file.name}: lỗi lưu file — ${error.message}`)
       }
-      if (editing?.id === khachHangId) attachedToEditing = true
     }
 
     setSaving(false)
     setDocImportOpen(false)
     setDocQueue([])
     load()
-
-    // Nếu đang mở đúng khách hàng vừa đính kèm, làm mới luôn danh sách giấy tờ trong modal.
-    if (attachedToEditing) {
-      const { data } = await getTaiLieuByKhachHang(editing.id)
-      setTaiLieus(data || [])
-    }
 
     if (errors.length > 0) {
       alert(`Có lỗi khi lưu:\n` + errors.join('\n'))
@@ -418,7 +352,11 @@ export default function KhachHang() {
             </thead>
             <tbody>
               {filtered.map((kh) => (
-                <tr key={kh.id} className="border-b border-[var(--color-line)] last:border-0 hover:bg-black/[0.015]">
+                <tr
+                  key={kh.id}
+                  onClick={() => navigate(`/khach-hang/${kh.id}`)}
+                  className="border-b border-[var(--color-line)] last:border-0 hover:bg-black/[0.015] cursor-pointer"
+                >
                   <td className="px-5 py-3 font-medium text-[var(--color-ink)]">{kh.ten_khach_hang}</td>
                   <td className="px-5 py-3">
                     <Badge className={PHAN_LOAI_COLORS[kh.phan_loai]}>
@@ -429,10 +367,7 @@ export default function KhachHang() {
                     {kh.so_dien_thoai || kh.email || '—'}
                   </td>
                   <td className="px-5 py-3 text-[var(--color-text-muted)]">{kh.ma_so_thue || '—'}</td>
-                  <td className="px-5 py-3 text-right space-x-2">
-                    <button onClick={() => openEdit(kh)} className="text-[var(--color-ink)] hover:underline text-sm font-medium">
-                      Sửa
-                    </button>
+                  <td className="px-5 py-3 text-right" onClick={(e) => e.stopPropagation()}>
                     <button onClick={() => handleDelete(kh)} className="text-[var(--color-danger)] hover:underline text-sm font-medium">
                       Xoá
                     </button>
@@ -444,7 +379,7 @@ export default function KhachHang() {
         )}
       </Card>
 
-      <Modal open={modalOpen} onClose={() => setModalOpen(false)} title={editing ? 'Sửa khách hàng' : 'Thêm khách hàng'} wide>
+      <Modal open={modalOpen} onClose={() => setModalOpen(false)} title="Thêm khách hàng" wide>
         <form onSubmit={handleSave} className="space-y-4">
           <Input
             label="Tên khách hàng *"
@@ -492,47 +427,6 @@ export default function KhachHang() {
             value={form.ghi_chu || ''}
             onChange={(e) => setForm({ ...form, ghi_chu: e.target.value })}
           />
-
-          {editing && (
-            <div>
-              <p className="text-xs font-medium text-[var(--color-text-muted)] uppercase tracking-wide mb-2">
-                Giấy tờ đính kèm
-              </p>
-              {taiLieusLoading ? (
-                <LoadingState />
-              ) : taiLieus.length === 0 ? (
-                <p className="text-xs text-[var(--color-text-muted)]">
-                  Chưa có giấy tờ nào. Dùng nút "📄 Nhập giấy tờ" ở trang danh sách để đính kèm.
-                </p>
-              ) : (
-                <ul className="divide-y divide-[var(--color-line)] border border-[var(--color-line)] rounded-lg">
-                  {taiLieus.map((tl) => (
-                    <li key={tl.id} className="px-3 py-2 flex items-center justify-between gap-3 text-sm">
-                      <button
-                        type="button"
-                        onClick={() => handleViewTaiLieu(tl)}
-                        className="text-left text-[var(--color-ink)] hover:underline truncate"
-                      >
-                        {tl.ten_file}
-                        {tl.loai_giay_to && (
-                          <span className="text-xs text-[var(--color-text-muted)] ml-1.5">
-                            ({LOAI_GIAY_TO_LABELS[tl.loai_giay_to] || tl.loai_giay_to})
-                          </span>
-                        )}
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => handleDeleteTaiLieu(tl)}
-                        className="text-xs text-[var(--color-danger)] hover:underline shrink-0"
-                      >
-                        Xoá
-                      </button>
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </div>
-          )}
 
           <div className="flex justify-end gap-2 pt-2">
             <Button type="button" variant="ghost" onClick={() => setModalOpen(false)}>Huỷ</Button>
