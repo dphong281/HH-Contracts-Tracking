@@ -347,7 +347,7 @@ export default function HopDongDetail() {
                     {pl.noi_dung && <div className="text-xs text-[var(--color-text-muted)] mt-0.5">{pl.noi_dung}</div>}
                     <div className="text-xs text-[var(--color-text-muted)] mt-0.5">Hiệu lực: {formatDate(pl.ngay_hieu_luc)}</div>
                   </div>
-                  <button onClick={() => handleDeletePhuLuc(pl.id)} className="text-xs text-[var(--color-danger)] hover:underline shrink-0">Xoá</button>
+                  <button onClick={() => handleDeletePhuLuc(pl.id)} className="text-xs text-[var(--color-danger)] hover:underline shrink-0 cursor-pointer">Xoá</button>
                 </li>
               ))}
             </ul>
@@ -373,7 +373,7 @@ export default function HopDongDetail() {
                     </div>
                     {tt.ghi_chu && <div className="text-xs text-[var(--color-text-muted)] mt-0.5">{tt.ghi_chu}</div>}
                   </div>
-                  <button onClick={() => handleDeleteThanhToan(tt.id)} className="text-xs text-[var(--color-danger)] hover:underline shrink-0">Xoá</button>
+                  <button onClick={() => handleDeleteThanhToan(tt.id)} className="text-xs text-[var(--color-danger)] hover:underline shrink-0 cursor-pointer">Xoá</button>
                 </li>
               ))}
             </ul>

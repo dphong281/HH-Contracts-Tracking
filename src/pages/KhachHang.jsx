@@ -38,37 +38,88 @@ function coreCompanyName(name = '') {
     .trim()
 }
 
-// So khớp 1 khách hàng trong danh sách theo MST (ưu tiên, chỉ so số) rồi tới tên
-// (so khớp tuyệt đối trước, không thấy thì so khớp "tên lõi" sau khi bỏ tiền tố
-// loại hình doanh nghiệp — chỉ nhận khi đủ dài để tránh khớp nhầm).
+// Các từ chung chung (loại hình DN, từ nối, từ phổ biến ít giá trị phân biệt)
+// không mang tính phân biệt khách hàng — bỏ qua khi so khớp theo "tỉ lệ từ trùng
+// khớp" ở tầng cuối, để tránh 1 từ vô nghĩa/rất phổ biến làm điểm khớp ảo cao.
+const GENERIC_WORDS = new Set([
+  'cong', 'ty', 'cty', 'tnhh', 'co', 'phan', 'cp', 'mtv', 'mot', 'thanh', 'vien',
+  'dntn', 'ho', 'kinh', 'doanh', 'tu', 'nhan', 'va', 'thuong', 'mai', 'hkd',
+  'khong', 'la', 'cua', 'tai', 'trong', 'nam', 'ngay', 'so', 'moi', 'nay', 'chi',
+])
+
+function meaningfulWords(name = '') {
+  return normalizeVN(name).split(/\s+/).filter((w) => w && !GENERIC_WORDS.has(w))
+}
+
+// So khớp 1 khách hàng trong danh sách theo MST (ưu tiên, chỉ so số) rồi tới tên.
+// Trả về { kh, uncertain } — uncertain=true nghĩa là khớp không rõ ràng (nhiều
+// khách hàng cùng điểm khớp, hoặc điểm khớp thấp) — VẪN tự chọn 1 người thay vì
+// để trống, nhưng modal xác nhận sẽ cảnh báo để kiểm tra kỹ trước khi lưu.
+// Trả về null CHỈ khi hoàn toàn không tìm được manh mối nào.
 function findMatchingKhachHang(list, candidateName, candidateMst) {
   const mstDigits = onlyDigits(candidateMst)
   if (mstDigits) {
     const byMst = list.find((kh) => kh.ma_so_thue && onlyDigits(kh.ma_so_thue) === mstDigits)
-    if (byMst) return byMst
+    if (byMst) return { kh: byMst, uncertain: false }
   }
   if (!candidateName) return null
 
   const normTarget = normalizeVN(candidateName)
   const exact = list.find((kh) => normalizeVN(kh.ten_khach_hang) === normTarget)
-  if (exact) return exact
+  if (exact) return { kh: exact, uncertain: false }
 
   const coreTarget = coreCompanyName(candidateName)
   if (coreTarget.length >= 4) {
     const byCore = list.find((kh) => coreCompanyName(kh.ten_khach_hang) === coreTarget)
-    if (byCore) return byCore
+    if (byCore) return { kh: byCore, uncertain: false }
   }
 
-  // Tầng cuối: tên thư mục là TÊN VIẾT TẮT/1 TỪ nằm trong tên đầy đủ (VD thư mục
-  // "AHH" ứng với "CÔNG TY TNHH XĂNG DẦU AHH"). So khớp theo ranh giới từ (không
-  // phải substring thô, tránh dính vào giữa 1 từ khác) — CHỈ tự chọn khi từ đó
-  // khớp DUY NHẤT 1 khách hàng trong danh sách, nếu khớp nhiều người thì bỏ qua
-  // để người dùng tự chọn tay, tránh gắn nhầm khách hàng.
+  // Tầng 3: tên thư mục là TÊN VIẾT TẮT/1 TỪ nằm trong tên đầy đủ (VD thư mục
+  // "AHH" ứng với "CÔNG TY TNHH XĂNG DẦU AHH"). So khớp theo ranh giới từ.
+  let tier3Candidates = []
   if (normTarget.length >= 2) {
     const escaped = normTarget.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
     const wordBoundaryRe = new RegExp(`(^|\\s)${escaped}(\\s|$)`)
-    const candidates = list.filter((kh) => wordBoundaryRe.test(normalizeVN(kh.ten_khach_hang)))
-    if (candidates.length === 1) return candidates[0]
+    tier3Candidates = list.filter((kh) => wordBoundaryRe.test(normalizeVN(kh.ten_khach_hang)))
+    if (tier3Candidates.length === 1) return { kh: tier3Candidates[0], uncertain: false }
+  }
+
+  // Tầng 4 (chiều ngược lại): tên khách hàng đã lưu (phần "lõi") nằm gọn trong
+  // tên thư mục — xử lý trường hợp tên lưu trong app NGẮN hơn tên thư mục.
+  const coreCandidates = list.filter((kh) => {
+    const khCore = coreCompanyName(kh.ten_khach_hang)
+    if (khCore.length < 3) return false
+    const escaped = khCore.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+    return new RegExp(`(^|\\s)${escaped}(\\s|$)`).test(normTarget)
+  })
+  if (coreCandidates.length === 1) return { kh: coreCandidates[0], uncertain: false }
+
+  // Nếu tầng 3 hoặc 4 có nhiều ứng viên (mơ hồ) — vẫn tự chọn người đầu tiên,
+  // đánh dấu uncertain=true để cảnh báo, thay vì để trống.
+  if (tier3Candidates.length > 1) return { kh: tier3Candidates[0], uncertain: true }
+  if (coreCandidates.length > 1) return { kh: coreCandidates[0], uncertain: true }
+
+  // Tầng 5 (cuối, lỏng nhất): so khớp theo TỈ LỆ TỪ TRÙNG — bỏ qua các từ chung
+  // chung (công ty, tnhh, và...), tính xem bao nhiêu % số từ "có nghĩa" của tên
+  // thư mục xuất hiện trong tên khách hàng. Luôn chọn điểm cao nhất nếu có ít
+  // nhất 1 từ trùng — đánh dấu uncertain nếu điểm thấp hoặc có nhiều người hoà điểm.
+  const targetWords = meaningfulWords(candidateName)
+  if (targetWords.length >= 1) {
+    const scored = list
+      .map((kh) => {
+        const khWords = new Set(meaningfulWords(kh.ten_khach_hang))
+        const hits = targetWords.filter((w) => khWords.has(w)).length
+        return { kh, score: hits / targetWords.length }
+      })
+      .filter((s) => s.score >= 0.34) // ít nhất 1/3 số từ có nghĩa phải trùng — tránh chọn bừa khi chỉ trùng ngẫu nhiên 1 từ
+      .sort((a, b) => b.score - a.score)
+
+    if (scored.length > 0) {
+      const top = scored[0]
+      const tiedWithTop = scored.filter((s) => s.score === top.score).length
+      const uncertain = top.score < 0.8 || tiedWithTop > 1
+      return { kh: top.kh, uncertain }
+    }
   }
 
   return null
@@ -199,8 +250,9 @@ export default function KhachHang() {
         key: `${folderName}-${Date.now()}-${Math.random()}`,
         folderName,
         files: groupFiles,
-        khach_hang_id: match ? match.id : '',
+        khach_hang_id: match ? match.kh.id : '',
         mode: match ? 'existing' : 'new',
+        uncertainMatch: match ? match.uncertain : false,
         newForm: { ...EMPTY_FORM, ten_khach_hang: folderName },
       })
     }
@@ -368,7 +420,7 @@ export default function KhachHang() {
                   </td>
                   <td className="px-5 py-3 text-[var(--color-text-muted)]">{kh.ma_so_thue || '—'}</td>
                   <td className="px-5 py-3 text-right" onClick={(e) => e.stopPropagation()}>
-                    <button onClick={() => handleDelete(kh)} className="text-[var(--color-danger)] hover:underline text-sm font-medium">
+                    <button onClick={() => handleDelete(kh)} className="text-[var(--color-danger)] hover:underline text-sm font-medium cursor-pointer">
                       Xoá
                     </button>
                   </td>
@@ -443,7 +495,10 @@ export default function KhachHang() {
           <form onSubmit={handleConfirmDocImport} className="space-y-4">
             <div className="space-y-4 max-h-[60vh] overflow-y-auto pr-1">
               {docQueue.map((item) => (
-                <div key={item.key} className="border border-[var(--color-line)] rounded-lg p-4 space-y-3">
+                <div
+                  key={item.key}
+                  className={`border rounded-lg p-4 space-y-3 ${item.uncertainMatch ? 'border-[var(--color-amber)]/50 bg-[var(--color-amber)]/[0.04]' : 'border-[var(--color-line)]'}`}
+                >
                   <div className="flex items-center justify-between">
                     <div className="text-sm font-medium text-[var(--color-ink)] truncate">
                       📁 {item.folderName}
@@ -452,11 +507,17 @@ export default function KhachHang() {
                     <button
                       type="button"
                       onClick={() => removeQueueItem(item.key)}
-                      className="text-xs text-[var(--color-danger)] hover:underline shrink-0 ml-3"
+                      className="text-xs text-[var(--color-danger)] hover:underline shrink-0 ml-3 cursor-pointer"
                     >
                       Bỏ qua thư mục này
                     </button>
                   </div>
+
+                  {item.uncertainMatch && (
+                    <div className="text-xs text-[var(--color-amber-dark)]">
+                      ⚠️ Khớp không chắc chắn (tên gần giống hoặc trùng với nhiều khách hàng) — kiểm tra kỹ trước khi lưu.
+                    </div>
+                  )}
 
                   <ul className="text-xs text-[var(--color-text-muted)] pl-1 space-y-0.5">
                     {item.files.map((f, i) => (

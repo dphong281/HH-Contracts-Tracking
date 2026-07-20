@@ -256,14 +256,14 @@ export default function KhachHangDetail() {
                   <button
                     type="button"
                     onClick={() => handleViewTaiLieu(tl)}
-                    className="text-left text-sm text-[var(--color-ink)] hover:underline truncate"
+                    className="text-left text-sm text-[var(--color-ink)] hover:underline truncate cursor-pointer"
                   >
                     {tl.ten_file}
                     {tl.loai_giay_to && (
                       <div className="text-xs text-[var(--color-text-muted)] mt-0.5">{LOAI_GIAY_TO_LABELS[tl.loai_giay_to] || tl.loai_giay_to}</div>
                     )}
                   </button>
-                  <button onClick={() => handleDeleteTaiLieu(tl)} className="text-xs text-[var(--color-danger)] hover:underline shrink-0">Xoá</button>
+                  <button onClick={() => handleDeleteTaiLieu(tl)} className="text-xs text-[var(--color-danger)] hover:underline shrink-0 cursor-pointer">Xoá</button>
                 </li>
               ))}
             </ul>
@@ -305,7 +305,7 @@ export default function KhachHangDetail() {
                       </div>
                     )}
                   </div>
-                  <button onClick={() => handleDeletePhuLuc(pl.id)} className="text-xs text-[var(--color-danger)] hover:underline shrink-0">Xoá</button>
+                  <button onClick={() => handleDeletePhuLuc(pl.id)} className="text-xs text-[var(--color-danger)] hover:underline shrink-0 cursor-pointer">Xoá</button>
                 </li>
               ))}
             </ul>

@@ -513,7 +513,7 @@ export default function HopDong() {
                     <button
                       type="button"
                       onClick={() => removeImportQueueItem(item.key)}
-                      className="text-xs text-[var(--color-danger)] hover:underline shrink-0 ml-3"
+                      className="text-xs text-[var(--color-danger)] hover:underline shrink-0 ml-3 cursor-pointer"
                     >
                       Bỏ qua file này
                     </button>
