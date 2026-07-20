@@ -32,9 +32,7 @@ export default function HopDong() {
   const [importing, setImporting] = useState(false)
   const [importError, setImportError] = useState(null)
   const [importOpen, setImportOpen] = useState(false)
-  const [importData, setImportData] = useState(null)
-  const [matchedKhachHang, setMatchedKhachHang] = useState(null)
-  const [khachHangMode, setKhachHangMode] = useState('existing') // 'existing' | 'new'
+  const [importQueue, setImportQueue] = useState([]) // [{ key, file, parsed, reason, khach_hang_id, khachHangMode, newForm, so_hop_dong, ngay_bat_dau, ngay_ket_thuc, gia_tri_hop_dong, nhan_vien_id, ghi_chu, ghi_chu_hop_dong }]
 
   useEffect(() => { load() }, [])
 
@@ -76,141 +74,221 @@ export default function HopDong() {
     navigate(`/hop-dong/${data.id}`)
   }
 
-  // ---------- NHẬP TỪ FILE WORD ----------
+  // ---------- NHẬP TỪ FILE WORD (tự động 100%, hỗ trợ nhiều file) ----------
   function openFilePicker() {
     setImportError(null)
     fileInputRef.current?.click()
   }
 
   async function handleFileSelected(e) {
-    const file = e.target.files?.[0]
+    const files = Array.from(e.target.files || [])
     e.target.value = ''
-    if (!file) return
+    if (files.length === 0) return
 
-    if (!file.name.toLowerCase().endsWith('.docx')) {
-      setImportError(
-        'Chỉ đọc được file .docx. Nếu file của bạn là .doc (Word cũ), mở file đó trong Word → File → Save As → chọn định dạng .docx rồi tải lên lại.'
-      )
-      return
-    }
+    const nonDocx = files.filter((f) => !f.name.toLowerCase().endsWith('.docx')).map((f) => f.name)
+    const docxFiles = files.filter((f) => f.name.toLowerCase().endsWith('.docx'))
 
     setImporting(true)
     setImportError(null)
-    try {
-      const text = await extractTextFromDocx(file)
-      const parsed = parseContractText(text)
 
-      if (!parsed.ten_khach_hang) {
-        setImportError('Không tìm thấy thông tin "Bên B" trong file. Bạn có thể nhập thủ công bên dưới hoặc kiểm tra lại file.')
+    const autoSaved = []
+    const failed = []
+    const needsReview = [] // thiếu số HĐ hoặc thiếu tên khách hàng — không đủ dữ liệu để tự lưu
+
+    // Danh sách khách hàng tạm dùng trong vòng lặp — cập nhật ngay khi tự tạo mới,
+    // để 2 file cùng một khách hàng trong 1 lần chọn không bị tạo trùng.
+    let workingKhachHangs = [...khachHangs]
+
+    for (const file of docxFiles) {
+      try {
+        const text = await extractTextFromDocx(file)
+        const parsed = parseContractText(text)
+
+        if (!parsed.so_hop_dong) {
+          const normTarget = normalizeVN(parsed.ten_khach_hang || '')
+          const match = workingKhachHangs.find((kh) => normalizeVN(kh.ten_khach_hang) === normTarget)
+          needsReview.push({
+            key: `${file.name}-${Date.now()}`,
+            file,
+            parsed,
+            reason: 'Không đọc được số hợp đồng',
+            khach_hang_id: match ? match.id : '',
+            khachHangMode: match ? 'existing' : 'new',
+            newForm: { ten_khach_hang: parsed.ten_khach_hang || '', phan_loai: parsed.phan_loai_goi_y || 'DL', dia_chi: parsed.dia_chi || '', so_dien_thoai: parsed.so_dien_thoai || '', ma_so_thue: parsed.ma_so_thue || '' },
+            so_hop_dong: parsed.so_hop_dong || '',
+            ngay_bat_dau: parsed.ngay_bat_dau || '',
+            ngay_ket_thuc: parsed.ngay_ket_thuc || '',
+            gia_tri_hop_dong: '',
+            nhan_vien_id: '',
+            ghi_chu_hop_dong: `Nhập tự động từ file Word: ${file.name}`,
+          })
+          continue
+        }
+        if (list.some((hd) => hd.so_hop_dong === parsed.so_hop_dong)) {
+          failed.push(`${file.name}: số HĐ "${parsed.so_hop_dong}" đã tồn tại — bỏ qua để tránh trùng`)
+          continue
+        }
+
+        let khachHangId = null
+        if (parsed.ten_khach_hang) {
+          const normTarget = normalizeVN(parsed.ten_khach_hang)
+          const match = workingKhachHangs.find((kh) => normalizeVN(kh.ten_khach_hang) === normTarget)
+          if (match) {
+            khachHangId = match.id
+          } else {
+            const { data: khData, error: khError } = await createKhachHang({
+              ten_khach_hang: parsed.ten_khach_hang,
+              phan_loai: parsed.phan_loai_goi_y || 'DL',
+              dia_chi: parsed.dia_chi || null,
+              so_dien_thoai: parsed.so_dien_thoai || null,
+              ma_so_thue: parsed.ma_so_thue || null,
+            })
+            if (khError) { failed.push(`${file.name}: lỗi tạo khách hàng — ${khError.message}`); continue }
+            khachHangId = khData.id
+            workingKhachHangs = [...workingKhachHangs, khData]
+          }
+        } else {
+          needsReview.push({ key: `${file.name}-${Date.now()}`, file, parsed, reason: 'Không đọc được tên khách hàng (Bên B)' })
+          continue
+        }
+
+        const { error } = await createHopDong({
+          khach_hang_id: khachHangId,
+          nhan_vien_id: null,
+          so_hop_dong: parsed.so_hop_dong,
+          ngay_bat_dau: parsed.ngay_bat_dau || null,
+          ngay_ket_thuc: parsed.ngay_ket_thuc || null,
+          gia_tri_hop_dong: 0,
+          trang_thai: 'dang_hieu_luc',
+          ghi_chu: null,
+          ghi_chu_hop_dong: `Nhập tự động từ file Word: ${file.name}`,
+          chi_tiet_import: buildChiTietImport(parsed),
+        })
+        if (error) { failed.push(`${file.name}: lỗi lưu hợp đồng — ${error.message}`); continue }
+        autoSaved.push(`${file.name} (${parsed.so_hop_dong})`)
+      } catch (err) {
+        failed.push(`${file.name}: ${err.message}`)
       }
+    }
 
-      const normTarget = normalizeVN(parsed.ten_khach_hang)
-      const match = khachHangs.find((kh) => normalizeVN(kh.ten_khach_hang) === normTarget)
-      setMatchedKhachHang(match || null)
-      setKhachHangMode(match ? 'existing' : 'new')
+    setImporting(false)
+    setKhachHangs(workingKhachHangs)
+    load()
 
-      setImportData({
-        ten_khach_hang: parsed.ten_khach_hang,
-        dia_chi: parsed.dia_chi,
-        so_dien_thoai: parsed.so_dien_thoai,
-        ma_so_thue: parsed.ma_so_thue,
-        phan_loai: parsed.phan_loai_goi_y || 'DL',
-        so_hop_dong: parsed.so_hop_dong,
-        ngay_bat_dau: parsed.ngay_bat_dau,
-        ngay_ket_thuc: parsed.ngay_ket_thuc,
-        gia_tri_hop_dong: '',
-        nhan_vien_id: '',
-        khach_hang_id_existing: match ? match.id : '',
-        ghi_chu: '',
-        ghi_chu_hop_dong: `Nhập tự động từ file Word: ${file.name}`,
-        // Thông tin phụ trích xuất từ file — chỉ để xem/lưu kèm, không có ô nhập riêng.
-        // Được lưu nguyên vào cột jsonb `chi_tiet_import` của hop_dong_dau_ra.
-        chi_tiet_import: {
-          loai_hop_dong: parsed.loai_hop_dong,
-          ngay_ky: parsed.ngay_ky,
-          dia_diem_ky: parsed.dia_diem_ky,
-          so_trang: parsed.so_trang,
-          so_ban: parsed.so_ban,
-          ben_b: {
-            fax: parsed.fax,
-            tai_khoan: parsed.tai_khoan,
-            dai_dien: parsed.dai_dien,
-            chuc_vu: parsed.chuc_vu,
-          },
-          san_luong_cam_ket: parsed.san_luong_cam_ket,
-          cong_thuc_gia: parsed.cong_thuc_gia,
-          chiet_khau: parsed.chiet_khau,
-          hinh_thuc_mua_ban: parsed.hinh_thuc_mua_ban,
-          hinh_thuc_thanh_toan: parsed.hinh_thuc_thanh_toan,
-          dat_coc_ky_quy: parsed.dat_coc_ky_quy,
-          thoi_han_doi_chieu_cong_no: parsed.thoi_han_doi_chieu_cong_no,
-          dieu_kien_don_phuong_cham_dut: parsed.dieu_kien_don_phuong_cham_dut,
-          nghia_vu_treo_logo: parsed.nghia_vu_treo_logo,
-          gia_han_tu_dong: parsed.gia_han_tu_dong,
-        },
-      })
+    let msg = ''
+    if (autoSaved.length) msg += `✅ Đã tự động nhập ${autoSaved.length} hợp đồng:\n${autoSaved.join('\n')}\n`
+    if (failed.length) msg += `\n⚠️ ${failed.length} file lỗi/bỏ qua:\n${failed.join('\n')}\n`
+    if (nonDocx.length) msg += `\n⚠️ Bỏ qua ${nonDocx.length} file không phải .docx: ${nonDocx.join(', ')}\n`
+    if (msg) alert(msg.trim())
+
+    if (needsReview.length > 0) {
+      setImportQueue(needsReview)
       setImportOpen(true)
-    } catch (err) {
-      setImportError('Không đọc được nội dung file: ' + err.message)
-    } finally {
-      setImporting(false)
+    }
+  }
+
+  // Gói lại dữ liệu phụ trích xuất từ file — dùng chung cho cả nhập tự động và nhập thủ công qua modal.
+  function buildChiTietImport(parsed) {
+    return {
+      loai_hop_dong: parsed.loai_hop_dong,
+      ngay_ky: parsed.ngay_ky,
+      dia_diem_ky: parsed.dia_diem_ky,
+      so_trang: parsed.so_trang,
+      so_ban: parsed.so_ban,
+      ben_b: {
+        fax: parsed.fax,
+        tai_khoan: parsed.tai_khoan,
+        dai_dien: parsed.dai_dien,
+        chuc_vu: parsed.chuc_vu,
+      },
+      san_luong_cam_ket: parsed.san_luong_cam_ket,
+      cong_thuc_gia: parsed.cong_thuc_gia,
+      chiet_khau: parsed.chiet_khau,
+      hinh_thuc_mua_ban: parsed.hinh_thuc_mua_ban,
+      hinh_thuc_thanh_toan: parsed.hinh_thuc_thanh_toan,
+      dat_coc_ky_quy: parsed.dat_coc_ky_quy,
+      thoi_han_doi_chieu_cong_no: parsed.thoi_han_doi_chieu_cong_no,
+      dieu_kien_don_phuong_cham_dut: parsed.dieu_kien_don_phuong_cham_dut,
+      nghia_vu_treo_logo: parsed.nghia_vu_treo_logo,
+      gia_han_tu_dong: parsed.gia_han_tu_dong,
     }
   }
 
   async function handleConfirmImport(e) {
     e.preventDefault()
     setSaving(true)
-    try {
-      let khachHangId = importData.khach_hang_id_existing
 
-      if (khachHangMode === 'new') {
-        if (!importData.ten_khach_hang) {
-          alert('Cần có tên khách hàng để tạo mới.')
-          setSaving(false)
-          return
+    const errors = []
+    let lastSavedId = null
+
+    for (const item of importQueue) {
+      let khachHangId = item.khach_hang_id
+
+      if (item.khachHangMode === 'new') {
+        if (!item.newForm.ten_khach_hang) {
+          errors.push(`${item.file.name}: cần tên khách hàng để tạo mới`)
+          continue
         }
         const { data: khData, error: khError } = await createKhachHang({
-          ten_khach_hang: importData.ten_khach_hang,
-          phan_loai: importData.phan_loai,
-          dia_chi: importData.dia_chi || null,
-          so_dien_thoai: importData.so_dien_thoai || null,
-          ma_so_thue: importData.ma_so_thue || null,
+          ten_khach_hang: item.newForm.ten_khach_hang,
+          phan_loai: item.newForm.phan_loai,
+          dia_chi: item.newForm.dia_chi || null,
+          so_dien_thoai: item.newForm.so_dien_thoai || null,
+          ma_so_thue: item.newForm.ma_so_thue || null,
         })
-        if (khError) { alert('Lỗi tạo khách hàng: ' + khError.message); setSaving(false); return }
+        if (khError) { errors.push(`${item.file.name}: lỗi tạo khách hàng — ${khError.message}`); continue }
         khachHangId = khData.id
       }
 
       if (!khachHangId) {
-        alert('Bạn cần chọn khách hàng có sẵn hoặc tạo khách hàng mới.')
-        setSaving(false)
-        return
+        errors.push(`${item.file.name}: chưa chọn khách hàng`)
+        continue
       }
-      if (!importData.so_hop_dong) {
-        alert('Cần nhập Số hợp đồng (file không có sẵn số HĐ).')
-        setSaving(false)
-        return
+      if (!item.so_hop_dong) {
+        errors.push(`${item.file.name}: chưa nhập số hợp đồng`)
+        continue
       }
 
       const { data, error } = await createHopDong({
         khach_hang_id: khachHangId,
-        nhan_vien_id: importData.nhan_vien_id || null,
-        so_hop_dong: importData.so_hop_dong,
-        ngay_bat_dau: importData.ngay_bat_dau || null,
-        ngay_ket_thuc: importData.ngay_ket_thuc || null,
-        gia_tri_hop_dong: Number(importData.gia_tri_hop_dong) || 0,
+        nhan_vien_id: item.nhan_vien_id || null,
+        so_hop_dong: item.so_hop_dong,
+        ngay_bat_dau: item.ngay_bat_dau || null,
+        ngay_ket_thuc: item.ngay_ket_thuc || null,
+        gia_tri_hop_dong: Number(item.gia_tri_hop_dong) || 0,
         trang_thai: 'dang_hieu_luc',
-        ghi_chu: importData.ghi_chu || null,
-        ghi_chu_hop_dong: importData.ghi_chu_hop_dong || null,
-        chi_tiet_import: importData.chi_tiet_import || null,
+        ghi_chu: null,
+        ghi_chu_hop_dong: item.ghi_chu_hop_dong || null,
+        chi_tiet_import: buildChiTietImport(item.parsed),
       })
-      setSaving(false)
-      if (error) { alert('Lỗi lưu hợp đồng: ' + error.message); return }
-      setImportOpen(false)
-      navigate(`/hop-dong/${data.id}`)
-    } catch (err) {
-      setSaving(false)
-      alert('Lỗi: ' + err.message)
+      if (error) { errors.push(`${item.file.name}: lỗi lưu hợp đồng — ${error.message}`); continue }
+      lastSavedId = data.id
     }
+
+    setSaving(false)
+    setImportOpen(false)
+    setImportQueue([])
+    load()
+
+    if (errors.length > 0) {
+      alert(`Có lỗi khi lưu:\n` + errors.join('\n'))
+    }
+    // Nếu chỉ có đúng 1 hợp đồng vừa lưu thành công, mở luôn trang chi tiết — tiện cho trường hợp phổ biến nhất (xem lại 1 file thiếu số HĐ).
+    if (lastSavedId && errors.length === 0 && importQueue.length === 1) {
+      navigate(`/hop-dong/${lastSavedId}`)
+    }
+  }
+
+  function updateImportQueueItem(key, patch) {
+    setImportQueue((prev) => prev.map((it) => (it.key === key ? { ...it, ...patch } : it)))
+  }
+
+  function updateImportQueueItemNewForm(key, patch) {
+    setImportQueue((prev) => prev.map((it) => (it.key === key ? { ...it, newForm: { ...it.newForm, ...patch } } : it)))
+  }
+
+  function removeImportQueueItem(key) {
+    setImportQueue((prev) => prev.filter((it) => it.key !== key))
   }
 
   const filtered = list.filter((hd) => {
@@ -233,6 +311,7 @@ export default function HopDong() {
             ref={fileInputRef}
             type="file"
             accept=".docx"
+            multiple
             className="hidden"
             onChange={handleFileSelected}
           />
@@ -418,248 +497,155 @@ export default function HopDong() {
         </form>
       </Modal>
 
-      {/* Modal xác nhận dữ liệu nhập từ Word */}
-      <Modal open={importOpen} onClose={() => setImportOpen(false)} title="Xác nhận thông tin nhập từ file Word" wide>
-        {importData && (
-          <form onSubmit={handleConfirmImport} className="space-y-5">
-            <div>
-              <p className="text-xs font-medium text-[var(--color-text-muted)] uppercase tracking-wide mb-2">
-                Thông tin khách hàng (Bên B)
-              </p>
-              {matchedKhachHang && (
-                <div className="mb-3 p-3 rounded-lg bg-[#2F7A5E]/8 text-sm text-[var(--color-good)]">
-                  Đã tìm thấy khách hàng có sẵn trùng tên: <strong>{matchedKhachHang.ten_khach_hang}</strong>
-                </div>
-              )}
-              <div className="flex gap-4 mb-3 text-sm">
-                <label className="flex items-center gap-1.5">
-                  <input
-                    type="radio"
-                    checked={khachHangMode === 'existing'}
-                    onChange={() => setKhachHangMode('existing')}
-                    disabled={!matchedKhachHang}
-                  />
-                  Dùng khách hàng có sẵn
-                </label>
-                <label className="flex items-center gap-1.5">
-                  <input
-                    type="radio"
-                    checked={khachHangMode === 'new'}
-                    onChange={() => setKhachHangMode('new')}
-                  />
-                  Tạo khách hàng mới từ dữ liệu trích xuất
-                </label>
-              </div>
+      {/* Modal xác nhận — chỉ cho các file KHÔNG đủ dữ liệu để tự lưu (thiếu số HĐ / thiếu tên khách hàng).
+          Các file đọc đủ dữ liệu đã được lưu thẳng, không cần xác nhận. */}
+      <Modal open={importOpen} onClose={() => setImportOpen(false)} title={`Cần xem lại (${importQueue.length} file)`} wide>
+        {importQueue.length > 0 && (
+          <form onSubmit={handleConfirmImport} className="space-y-4">
+            <div className="space-y-4 max-h-[65vh] overflow-y-auto pr-1">
+              {importQueue.map((item) => (
+                <div key={item.key} className="border border-[var(--color-line)] rounded-lg p-4 space-y-4">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <div className="text-sm font-medium text-[var(--color-ink)] truncate">{item.file.name}</div>
+                      <div className="text-xs text-[var(--color-amber-dark)] mt-0.5">{item.reason}</div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => removeImportQueueItem(item.key)}
+                      className="text-xs text-[var(--color-danger)] hover:underline shrink-0 ml-3"
+                    >
+                      Bỏ qua file này
+                    </button>
+                  </div>
 
-              {khachHangMode === 'existing' ? (
-                <Select
-                  label="Khách hàng"
-                  value={importData.khach_hang_id_existing}
-                  onChange={(e) => setImportData({ ...importData, khach_hang_id_existing: e.target.value })}
-                >
-                  <option value="">— Chọn khách hàng —</option>
-                  {khachHangs.map((kh) => (
-                    <option key={kh.id} value={kh.id}>{kh.ten_khach_hang}</option>
-                  ))}
-                </Select>
-              ) : (
-                <div className="grid grid-cols-2 gap-4">
-                  <Input
-                    label="Tên khách hàng *"
-                    required
-                    value={importData.ten_khach_hang}
-                    onChange={(e) => setImportData({ ...importData, ten_khach_hang: e.target.value })}
-                  />
-                  <Select
-                    label="Phân loại"
-                    value={importData.phan_loai}
-                    onChange={(e) => setImportData({ ...importData, phan_loai: e.target.value })}
-                  >
-                    {Object.entries(PHAN_LOAI_LABELS).map(([k, v]) => (
-                      <option key={k} value={k}>{v} ({k})</option>
-                    ))}
-                  </Select>
-                  <Input
-                    label="Địa chỉ"
-                    className="col-span-2"
-                    value={importData.dia_chi}
-                    onChange={(e) => setImportData({ ...importData, dia_chi: e.target.value })}
-                  />
-                  <Input
-                    label="Điện thoại"
-                    value={importData.so_dien_thoai}
-                    onChange={(e) => setImportData({ ...importData, so_dien_thoai: e.target.value })}
-                  />
-                  <Input
-                    label="Mã số thuế"
-                    value={importData.ma_so_thue}
-                    onChange={(e) => setImportData({ ...importData, ma_so_thue: e.target.value })}
-                  />
-                </div>
-              )}
-            </div>
+                  <div>
+                    <p className="text-xs font-medium text-[var(--color-text-muted)] uppercase tracking-wide mb-2">
+                      Khách hàng (Bên B)
+                    </p>
+                    <div className="flex gap-4 mb-3 text-sm">
+                      <label className="flex items-center gap-1.5">
+                        <input
+                          type="radio"
+                          checked={item.khachHangMode === 'existing'}
+                          onChange={() => updateImportQueueItem(item.key, { khachHangMode: 'existing' })}
+                        />
+                        Dùng khách hàng có sẵn
+                      </label>
+                      <label className="flex items-center gap-1.5">
+                        <input
+                          type="radio"
+                          checked={item.khachHangMode === 'new'}
+                          onChange={() => updateImportQueueItem(item.key, { khachHangMode: 'new' })}
+                        />
+                        Tạo khách hàng mới
+                      </label>
+                    </div>
 
-            <div>
-              <p className="text-xs font-medium text-[var(--color-text-muted)] uppercase tracking-wide mb-2">
-                Thông tin hợp đồng
-              </p>
-              <div className="grid grid-cols-2 gap-4">
-                <Input
-                  label="Số hợp đồng *"
-                  required
-                  placeholder="File không có sẵn — nhập tay"
-                  value={importData.so_hop_dong}
-                  onChange={(e) => setImportData({ ...importData, so_hop_dong: e.target.value })}
-                />
-                <Select
-                  label="Nhân viên phụ trách"
-                  value={importData.nhan_vien_id}
-                  onChange={(e) => setImportData({ ...importData, nhan_vien_id: e.target.value })}
-                >
-                  <option value="">— Chọn nhân viên —</option>
-                  {nhanViens.map((nv) => (
-                    <option key={nv.id} value={nv.id}>{nv.ho_ten}</option>
-                  ))}
-                </Select>
-                <Input
-                  label="Ngày bắt đầu"
-                  type="date"
-                  value={importData.ngay_bat_dau}
-                  onChange={(e) => setImportData({ ...importData, ngay_bat_dau: e.target.value })}
-                />
-                <Input
-                  label="Ngày kết thúc"
-                  type="date"
-                  value={importData.ngay_ket_thuc}
-                  onChange={(e) => setImportData({ ...importData, ngay_ket_thuc: e.target.value })}
-                />
-                <Input
-                  label="Giá trị hợp đồng (đ)"
-                  type="number"
-                  min="0"
-                  value={importData.gia_tri_hop_dong}
-                  onChange={(e) => setImportData({ ...importData, gia_tri_hop_dong: e.target.value })}
-                />
-              </div>
-              <Textarea
-                label="Ghi chú"
-                rows={2}
-                className="mt-4"
-                value={importData.ghi_chu}
-                onChange={(e) => setImportData({ ...importData, ghi_chu: e.target.value })}
-              />
-              <Textarea
-                label="Ghi chú hợp đồng"
-                rows={2}
-                className="mt-4"
-                value={importData.ghi_chu_hop_dong}
-                onChange={(e) => setImportData({ ...importData, ghi_chu_hop_dong: e.target.value })}
-              />
-            </div>
-
-            {importData.chi_tiet_import && (
-              <div>
-                <p className="text-xs font-medium text-[var(--color-text-muted)] uppercase tracking-wide mb-2">
-                  Thông tin khác trích xuất từ file (sẽ lưu kèm hợp đồng)
-                </p>
-                <div className="rounded-lg border border-[var(--color-line)] p-4 space-y-3 text-sm">
-                  <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs">
-                    {importData.chi_tiet_import.loai_hop_dong && (
-                      <div><span className="text-[var(--color-text-muted)]">Loại HĐ:</span> {importData.chi_tiet_import.loai_hop_dong}</div>
-                    )}
-                    {importData.chi_tiet_import.ngay_ky && (
-                      <div><span className="text-[var(--color-text-muted)]">Ngày ký:</span> {formatDate(importData.chi_tiet_import.ngay_ky)}</div>
-                    )}
-                    {importData.chi_tiet_import.dia_diem_ky && (
-                      <div><span className="text-[var(--color-text-muted)]">Nơi ký:</span> {importData.chi_tiet_import.dia_diem_ky}</div>
-                    )}
-                    {(importData.chi_tiet_import.so_trang || importData.chi_tiet_import.so_ban) && (
-                      <div><span className="text-[var(--color-text-muted)]">Số trang / số bản:</span> {importData.chi_tiet_import.so_trang || '—'} / {importData.chi_tiet_import.so_ban || '—'}</div>
-                    )}
-                    {importData.chi_tiet_import.ben_b?.dai_dien && (
-                      <div><span className="text-[var(--color-text-muted)]">Đại diện Bên B:</span> {importData.chi_tiet_import.ben_b.dai_dien}{importData.chi_tiet_import.ben_b.chuc_vu ? ` (${importData.chi_tiet_import.ben_b.chuc_vu})` : ''}</div>
-                    )}
-                    {importData.chi_tiet_import.ben_b?.fax && (
-                      <div><span className="text-[var(--color-text-muted)]">Fax:</span> {importData.chi_tiet_import.ben_b.fax}</div>
-                    )}
-                    {importData.chi_tiet_import.ben_b?.tai_khoan?.length > 0 && (
-                      <div className="col-span-2"><span className="text-[var(--color-text-muted)]">Số TK:</span> {importData.chi_tiet_import.ben_b.tai_khoan.join(' · ')}</div>
+                    {item.khachHangMode === 'existing' ? (
+                      <Select
+                        label="Khách hàng"
+                        value={item.khach_hang_id}
+                        onChange={(e) => updateImportQueueItem(item.key, { khach_hang_id: e.target.value })}
+                      >
+                        <option value="">— Chọn khách hàng —</option>
+                        {khachHangs.map((kh) => (
+                          <option key={kh.id} value={kh.id}>{kh.ten_khach_hang}</option>
+                        ))}
+                      </Select>
+                    ) : (
+                      <div className="grid grid-cols-2 gap-4">
+                        <Input
+                          label="Tên khách hàng *"
+                          required
+                          className="col-span-2"
+                          value={item.newForm.ten_khach_hang}
+                          onChange={(e) => updateImportQueueItemNewForm(item.key, { ten_khach_hang: e.target.value })}
+                        />
+                        <Select
+                          label="Phân loại"
+                          value={item.newForm.phan_loai}
+                          onChange={(e) => updateImportQueueItemNewForm(item.key, { phan_loai: e.target.value })}
+                        >
+                          {Object.entries(PHAN_LOAI_LABELS).map(([k, v]) => (
+                            <option key={k} value={k}>{v} ({k})</option>
+                          ))}
+                        </Select>
+                        <Input
+                          label="Địa chỉ"
+                          className="col-span-2"
+                          value={item.newForm.dia_chi}
+                          onChange={(e) => updateImportQueueItemNewForm(item.key, { dia_chi: e.target.value })}
+                        />
+                        <Input
+                          label="Điện thoại"
+                          value={item.newForm.so_dien_thoai}
+                          onChange={(e) => updateImportQueueItemNewForm(item.key, { so_dien_thoai: e.target.value })}
+                        />
+                        <Input
+                          label="Mã số thuế"
+                          value={item.newForm.ma_so_thue}
+                          onChange={(e) => updateImportQueueItemNewForm(item.key, { ma_so_thue: e.target.value })}
+                        />
+                      </div>
                     )}
                   </div>
 
-                  {importData.chi_tiet_import.san_luong_cam_ket?.length > 0 && (
-                    <div>
-                      <div className="text-xs text-[var(--color-text-muted)] mb-1">Sản lượng cam kết</div>
-                      <table className="w-full text-xs">
-                        <tbody>
-                          {importData.chi_tiet_import.san_luong_cam_ket.map((sl, i) => (
-                            <tr key={i} className="border-t border-[var(--color-line)] first:border-0">
-                              <td className="py-1 pr-2">{sl.ten_hang}</td>
-                              <td className="py-1 text-right font-medium">{sl.so_luong} {sl.don_vi}/tháng</td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
+                  <div>
+                    <p className="text-xs font-medium text-[var(--color-text-muted)] uppercase tracking-wide mb-2">
+                      Thông tin hợp đồng
+                    </p>
+                    <div className="grid grid-cols-2 gap-4">
+                      <Input
+                        label="Số hợp đồng *"
+                        required
+                        placeholder="File không có sẵn — nhập tay"
+                        value={item.so_hop_dong}
+                        onChange={(e) => updateImportQueueItem(item.key, { so_hop_dong: e.target.value })}
+                      />
+                      <Select
+                        label="Nhân viên phụ trách"
+                        value={item.nhan_vien_id}
+                        onChange={(e) => updateImportQueueItem(item.key, { nhan_vien_id: e.target.value })}
+                      >
+                        <option value="">— Chọn nhân viên —</option>
+                        {nhanViens.map((nv) => (
+                          <option key={nv.id} value={nv.id}>{nv.ho_ten}</option>
+                        ))}
+                      </Select>
+                      <Input
+                        label="Ngày bắt đầu"
+                        type="date"
+                        value={item.ngay_bat_dau}
+                        onChange={(e) => updateImportQueueItem(item.key, { ngay_bat_dau: e.target.value })}
+                      />
+                      <Input
+                        label="Ngày kết thúc"
+                        type="date"
+                        value={item.ngay_ket_thuc}
+                        onChange={(e) => updateImportQueueItem(item.key, { ngay_ket_thuc: e.target.value })}
+                      />
+                      <Input
+                        label="Giá trị hợp đồng (đ)"
+                        type="number"
+                        min="0"
+                        value={item.gia_tri_hop_dong}
+                        onChange={(e) => updateImportQueueItem(item.key, { gia_tri_hop_dong: e.target.value })}
+                      />
                     </div>
-                  )}
-
-                  {(importData.chi_tiet_import.cong_thuc_gia || importData.chi_tiet_import.chiet_khau) && (
-                    <div className="text-xs">
-                      <span className="text-[var(--color-text-muted)]">Giá & chiết khấu:</span>{' '}
-                      {importData.chi_tiet_import.cong_thuc_gia}
-                      {importData.chi_tiet_import.chiet_khau && ` — Chiết khấu: ${importData.chi_tiet_import.chiet_khau}`}
-                    </div>
-                  )}
-
-                  {(importData.chi_tiet_import.hinh_thuc_mua_ban?.length > 0 || importData.chi_tiet_import.hinh_thuc_thanh_toan?.length > 0) && (
-                    <div className="text-xs">
-                      {importData.chi_tiet_import.hinh_thuc_mua_ban?.length > 0 && (
-                        <div><span className="text-[var(--color-text-muted)]">Hình thức mua bán:</span> {importData.chi_tiet_import.hinh_thuc_mua_ban.join(', ')}</div>
-                      )}
-                      {importData.chi_tiet_import.hinh_thuc_thanh_toan?.length > 0 && (
-                        <div><span className="text-[var(--color-text-muted)]">Hình thức thanh toán:</span> {importData.chi_tiet_import.hinh_thuc_thanh_toan.join(', ')}</div>
-                      )}
-                      {importData.chi_tiet_import.dat_coc_ky_quy && (
-                        <div className="text-[var(--color-amber-dark)]">Có yêu cầu đặt cọc / ký quỹ</div>
-                      )}
-                      {importData.chi_tiet_import.thoi_han_doi_chieu_cong_no && (
-                        <div><span className="text-[var(--color-text-muted)]">Thời hạn đối chiếu công nợ:</span> {importData.chi_tiet_import.thoi_han_doi_chieu_cong_no}</div>
-                      )}
-                    </div>
-                  )}
-
-                  {(importData.chi_tiet_import.dieu_kien_don_phuong_cham_dut?.length > 0 || importData.chi_tiet_import.nghia_vu_treo_logo || importData.chi_tiet_import.gia_han_tu_dong) && (
-                    <div className="text-xs space-y-1">
-                      {importData.chi_tiet_import.gia_han_tu_dong && (
-                        <div><span className="text-[var(--color-text-muted)]">Gia hạn/thanh lý:</span> {importData.chi_tiet_import.gia_han_tu_dong}</div>
-                      )}
-                      {importData.chi_tiet_import.nghia_vu_treo_logo && (
-                        <div>Có nghĩa vụ treo logo / biển hiệu</div>
-                      )}
-                      {importData.chi_tiet_import.dieu_kien_don_phuong_cham_dut?.length > 0 && (
-                        <div>
-                          <span className="text-[var(--color-text-muted)]">Điều kiện đơn phương chấm dứt:</span>
-                          <ul className="list-disc list-inside mt-0.5">
-                            {importData.chi_tiet_import.dieu_kien_don_phuong_cham_dut.map((d, i) => (
-                              <li key={i}>{d}</li>
-                            ))}
-                          </ul>
-                        </div>
-                      )}
-                    </div>
-                  )}
+                  </div>
                 </div>
-              </div>
-            )}
+              ))}
+            </div>
 
             <p className="text-xs text-[var(--color-text-muted)]">
-              Dữ liệu được trích xuất tự động từ file Word, kiểm tra lại trước khi lưu — đặc biệt các trường có thể để trống nếu file không ghi rõ.
+              Các file này thiếu dữ liệu bắt buộc nên không tự lưu được — kiểm tra/điền thêm rồi bấm Lưu.
             </p>
 
             <div className="flex justify-end gap-2 pt-2">
-              <Button type="button" variant="ghost" onClick={() => setImportOpen(false)}>Huỷ</Button>
+              <Button type="button" variant="ghost" onClick={() => setImportOpen(false)}>Huỷ tất cả</Button>
               <Button type="submit" variant="amber" disabled={saving}>
-                {saving ? 'Đang lưu...' : 'Lưu & mở chi tiết'}
+                {saving ? 'Đang lưu...' : `Lưu ${importQueue.length} file`}
               </Button>
             </div>
           </form>

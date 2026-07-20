@@ -69,6 +69,19 @@ function findMatchingKhachHang(list, candidateName, candidateMst) {
     const byCore = list.find((kh) => coreCompanyName(kh.ten_khach_hang) === coreTarget)
     if (byCore) return byCore
   }
+
+  // Tầng cuối: tên thư mục là TÊN VIẾT TẮT/1 TỪ nằm trong tên đầy đủ (VD thư mục
+  // "AHH" ứng với "CÔNG TY TNHH XĂNG DẦU AHH"). So khớp theo ranh giới từ (không
+  // phải substring thô, tránh dính vào giữa 1 từ khác) — CHỈ tự chọn khi từ đó
+  // khớp DUY NHẤT 1 khách hàng trong danh sách, nếu khớp nhiều người thì bỏ qua
+  // để người dùng tự chọn tay, tránh gắn nhầm khách hàng.
+  if (normTarget.length >= 2) {
+    const escaped = normTarget.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+    const wordBoundaryRe = new RegExp(`(^|\\s)${escaped}(\\s|$)`)
+    const candidates = list.filter((kh) => wordBoundaryRe.test(normalizeVN(kh.ten_khach_hang)))
+    if (candidates.length === 1) return candidates[0]
+  }
+
   return null
 }
 
