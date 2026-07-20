@@ -311,16 +311,23 @@ export function parseContractText(text) {
   const gia_han_tu_dong = extractGiaHanTuDong(dieu12 ? dieu12.noi_dung : clean)
 
   // ===== Gợi ý phân loại khách hàng (giữ nguyên logic cũ) =====
-  const hasWord = (re) => re.test(clean)
-  const hasAbbrev = (code) => new RegExp(`(^|[\\s:.,(])${code}([\\s:.,)]|$)`, 'i').test(clean)
+  // ===== Gợi ý phân loại khách hàng (SỬA 2 LẦN:
+  // 1) Trước đây quét toàn văn bản — bất kỳ hợp đồng nào nhắc "đại lý" ở đâu đó
+  //    (dẫn chiếu luật, hệ thống phân phối...) cũng bị nhận nhầm thành ĐL.
+  // 2) Thu hẹp xuống 500 ký tự đầu vẫn chưa đủ — các dòng "Căn cứ Nghị định... về
+  //    đại lý" ngay sau tiêu đề vẫn lọt vào, tiếp tục gây nhận nhầm.
+  // Giải pháp: chỉ xét ĐÚNG DÒNG TIÊU ĐỀ "HỢP ĐỒNG ..." — nơi duy nhất ghi loại
+  // hợp đồng thật, không lẫn nội dung điều khoản. =====
+  const titleLineMatch = clean.match(/H[ỢO]P\s*Đ[ỒO]NG[^\n]*/i)
+  const titleArea = titleLineMatch ? titleLineMatch[0] : clean.slice(0, 200)
   let phan_loai_goi_y = ''
-  if (hasWord(/T\s*N\s*P\s*P/i) || hasWord(/th[ưu][ơo]ng\s*nh[âa]n\s*ph[âa]n\s*ph[ốo]i/i) || hasAbbrev('TNPP')) {
+  if (/TH[ƯU][ƠO]NG\s*NH[ÂA]N\s*PH[ÂA]N\s*PH[ỐO]I/i.test(titleArea) || /\bTNPP\b/i.test(titleArea)) {
     phan_loai_goi_y = 'TNPP'
-  } else if (hasWord(/t[ổo]ng\s*đ[ạa]i\s*l[ýy]|đ[ạa]i\s*l[ýy]/i) || hasAbbrev('ĐL') || hasAbbrev('DL')) {
+  } else if (/(T[ỔO]NG\s*)?[ĐD][ẠA]I\s*L[ÝY]/i.test(titleArea) || /\bĐL\b/i.test(titleArea)) {
     phan_loai_goi_y = 'DL'
-  } else if (hasWord(/ti[êe]u\s*th[ụu]\s*tr[ựu]c\s*ti[ếe]p/i) || hasAbbrev('TTTT')) {
+  } else if (/TI[ÊE]U\s*TH[Ụ]?\s*TR[ỰU]C\s*TI[ẾE]P/i.test(titleArea) || /\bTTTT\b/i.test(titleArea)) {
     phan_loai_goi_y = 'TTTT'
-  } else if (hasAbbrev('MB')) {
+  } else if (/MUA\s*B[ÁA]N/i.test(titleArea) || /\bMB\b/i.test(titleArea)) {
     phan_loai_goi_y = 'MB'
   }
 
