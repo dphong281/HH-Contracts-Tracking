@@ -3,8 +3,8 @@ import { useParams, useNavigate, Link } from 'react-router-dom'
 import {
   getKhachHangById, updateKhachHang, deleteKhachHang,
   getHopDongByKhachHang,
-  getTaiLieuByKhachHang, getTaiLieuSignedUrl, deleteTaiLieuKhachHang,
-  getPhuLucByKhachHang, createPhuLuc, deletePhuLuc,
+  getTaiLieuByKhachHang, uploadTaiLieuKhachHang, getTaiLieuSignedUrl, deleteTaiLieuKhachHang,
+  getPhuLucByKhachHang, createPhuLucWithFile, getPhuLucSignedUrl, deletePhuLuc,
   ConflictError,
 } from '../lib/queries'
 import { PHAN_LOAI_LABELS, TRANG_THAI_LABELS, TRANG_THAI_COLORS, formatCurrency, formatDate, daysUntil } from '../lib/format'
@@ -43,7 +43,11 @@ export default function KhachHangDetail() {
   const [saving, setSaving] = useState(false)
 
   const [plOpen, setPlOpen] = useState(false)
+  const [plFile, setPlFile] = useState(null)
   const [plForm, setPlForm] = useState({ hop_dong_id: '', so_phu_luc: '', ten_phu_luc: '', ngay_bat_dau: '', ngay_ket_thuc: '', noi_dung: '' })
+  const [plSaving, setPlSaving] = useState(false)
+
+  const [taiLieuUploading, setTaiLieuUploading] = useState(false)
 
   useEffect(() => { load() }, [id])
 
@@ -125,7 +129,26 @@ export default function KhachHangDetail() {
     setTaiLieus((prev) => prev.filter((t) => t.id !== tl.id))
   }
 
+  async function handleQuickUploadTaiLieu(e) {
+    const files = Array.from(e.target.files || [])
+    e.target.value = ''
+    if (files.length === 0) return
+
+    setTaiLieuUploading(true)
+    const errors = []
+    for (const file of files) {
+      const { error } = await uploadTaiLieuKhachHang(id, file, null)
+      if (error) errors.push(`${file.name}: ${error.message}`)
+    }
+    setTaiLieuUploading(false)
+    if (errors.length > 0) alert('Có lỗi khi lưu:\n' + errors.join('\n'))
+
+    const { data } = await getTaiLieuByKhachHang(id)
+    setTaiLieus(data || [])
+  }
+
   function openAddPhuLuc() {
+    setPlFile(null)
     setPlForm({
       hop_dong_id: hopDongs.length === 1 ? hopDongs[0].id : '',
       so_phu_luc: '',
@@ -140,15 +163,29 @@ export default function KhachHangDetail() {
   async function handleAddPhuLuc(e) {
     e.preventDefault()
     if (!plForm.hop_dong_id) { alert('Cần chọn hợp đồng áp dụng cho phụ lục này.'); return }
-    const { error } = await createPhuLuc(plForm)
+    if (!plFile) { alert('Cần chọn file Word/Excel cho phụ lục.'); return }
+    setPlSaving(true)
+    const { error } = await createPhuLucWithFile(plForm.hop_dong_id, plFile, plForm)
+    setPlSaving(false)
     if (error) { alert('Lỗi: ' + error.message); return }
     setPlOpen(false)
+    setPlFile(null)
     load()
   }
 
-  async function handleDeletePhuLuc(plId) {
+  async function handleViewPhuLuc(pl) {
+    if (!pl.storage_path) return
+    const { data, error } = await getPhuLucSignedUrl(pl.storage_path)
+    if (error || !data?.signedUrl) {
+      alert('Không mở được file: ' + (error?.message || 'lỗi không xác định'))
+      return
+    }
+    window.open(data.signedUrl, '_blank')
+  }
+
+  async function handleDeletePhuLuc(plId, storagePath) {
     if (!confirm('Xoá phụ lục này?')) return
-    await deletePhuLuc(plId)
+    await deletePhuLuc(plId, storagePath)
     load()
   }
 
@@ -246,9 +283,20 @@ export default function KhachHangDetail() {
         <Card>
           <div className="flex items-center justify-between px-5 py-4 border-b border-[var(--color-line)]">
             <h3 className="font-display font-semibold text-[var(--color-ink)]">Giấy tờ đính kèm</h3>
+            <label className="!py-1.5 !px-3 text-xs inline-flex items-center rounded-lg border border-[var(--color-line)] hover:bg-black/[0.02] cursor-pointer font-medium text-[var(--color-ink)]">
+              {taiLieuUploading ? 'Đang tải lên...' : '+ Thêm'}
+              <input
+                type="file"
+                accept=".pdf,.png,.jpg,.jpeg,.webp"
+                multiple
+                disabled={taiLieuUploading}
+                onChange={handleQuickUploadTaiLieu}
+                className="hidden"
+              />
+            </label>
           </div>
           {taiLieus.length === 0 ? (
-            <EmptyState title="Chưa có giấy tờ" sub='Dùng nút "Nhập giấy tờ theo thư mục" ở trang danh sách khách hàng.' />
+            <EmptyState title="Chưa có giấy tờ" sub='Bấm "+ Thêm" để chọn file, hoặc dùng "Nhập giấy tờ theo thư mục" ở trang danh sách khách hàng.' />
           ) : (
             <ul className="divide-y divide-[var(--color-line)]">
               {taiLieus.map((tl) => (
@@ -297,7 +345,17 @@ export default function KhachHangDetail() {
                     {pl.so_phu_luc && (
                       <div className="text-xs text-[var(--color-text-muted)]">Số {pl.so_phu_luc} — HĐ {pl.so_hop_dong}</div>
                     )}
-                    <div className="font-medium text-sm text-[var(--color-ink)]">{pl.ten_phu_luc}</div>
+                    {pl.storage_path ? (
+                      <button
+                        type="button"
+                        onClick={() => handleViewPhuLuc(pl)}
+                        className="text-left font-medium text-sm text-[var(--color-ink)] hover:underline cursor-pointer"
+                      >
+                        📎 {pl.ten_phu_luc || pl.ten_file}
+                      </button>
+                    ) : (
+                      <div className="font-medium text-sm text-[var(--color-ink)]">{pl.ten_phu_luc}</div>
+                    )}
                     {pl.noi_dung && <div className="text-xs text-[var(--color-text-muted)] mt-0.5">{pl.noi_dung}</div>}
                     {(pl.ngay_bat_dau || pl.ngay_ket_thuc) && (
                       <div className="text-xs text-[var(--color-text-muted)] mt-0.5">
@@ -305,7 +363,7 @@ export default function KhachHangDetail() {
                       </div>
                     )}
                   </div>
-                  <button onClick={() => handleDeletePhuLuc(pl.id)} className="text-xs text-[var(--color-danger)] hover:underline shrink-0 cursor-pointer">Xoá</button>
+                  <button onClick={() => handleDeletePhuLuc(pl.id, pl.storage_path)} className="text-xs text-[var(--color-danger)] hover:underline shrink-0 cursor-pointer">Xoá</button>
                 </li>
               ))}
             </ul>
@@ -352,24 +410,33 @@ export default function KhachHangDetail() {
               <option key={hd.id} value={hd.id}>{hd.so_hop_dong}</option>
             ))}
           </Select>
+          <div>
+            <label className="block text-sm font-medium text-[var(--color-ink)] mb-1.5">File phụ lục (Word/Excel) *</label>
+            <input
+              type="file"
+              required
+              accept=".doc,.docx,.xls,.xlsx"
+              onChange={(e) => setPlFile(e.target.files?.[0] || null)}
+              className="w-full text-sm file:mr-3 file:py-2 file:px-3 file:rounded-lg file:border-0 file:bg-[var(--color-amber)]/15 file:text-[var(--color-amber-dark)] file:cursor-pointer cursor-pointer"
+            />
+          </div>
           <div className="grid grid-cols-2 gap-4">
             <Input label="Số phụ lục" value={plForm.so_phu_luc} onChange={(e) => setPlForm({ ...plForm, so_phu_luc: e.target.value })} />
+            <Input
+              label="Tên phụ lục"
+              placeholder="Về việc ... (để trống dùng tên file)"
+              value={plForm.ten_phu_luc}
+              onChange={(e) => setPlForm({ ...plForm, ten_phu_luc: e.target.value })}
+            />
           </div>
-          <Input
-            label="Tên phụ lục *"
-            required
-            placeholder="Về việc ..."
-            value={plForm.ten_phu_luc}
-            onChange={(e) => setPlForm({ ...plForm, ten_phu_luc: e.target.value })}
-          />
           <div className="grid grid-cols-2 gap-4">
             <Input label="Thời hạn từ ngày" type="date" value={plForm.ngay_bat_dau} onChange={(e) => setPlForm({ ...plForm, ngay_bat_dau: e.target.value })} />
             <Input label="Đến ngày" type="date" value={plForm.ngay_ket_thuc} onChange={(e) => setPlForm({ ...plForm, ngay_ket_thuc: e.target.value })} />
           </div>
-          <Textarea label="Nội dung" rows={3} value={plForm.noi_dung} onChange={(e) => setPlForm({ ...plForm, noi_dung: e.target.value })} />
+          <Textarea label="Ghi chú" rows={2} value={plForm.noi_dung} onChange={(e) => setPlForm({ ...plForm, noi_dung: e.target.value })} />
           <div className="flex justify-end gap-2 pt-2">
             <Button type="button" variant="ghost" onClick={() => setPlOpen(false)}>Huỷ</Button>
-            <Button type="submit" variant="amber">Lưu</Button>
+            <Button type="submit" variant="amber" disabled={plSaving}>{plSaving ? 'Đang lưu...' : 'Lưu'}</Button>
           </div>
         </form>
       </Modal>

@@ -318,7 +318,9 @@ export async function markYeuCauDaXuLy(id) {
     .eq('id', id)
 }
 
-// ---------- PHỤ LỤC ----------
+// ---------- PHỤ LỤC — đính kèm file Word/Excel (thay cho nhập tay nội dung) ----------
+const PHU_LUC_BUCKET = 'phu-luc-hop-dong'
+
 export async function getPhuLucByHopDong(hopDongId) {
   return supabase
     .from('phu_luc_hop_dong')
@@ -326,10 +328,54 @@ export async function getPhuLucByHopDong(hopDongId) {
     .eq('hop_dong_id', hopDongId)
     .order('created_at', { ascending: false })
 }
+
+// Upload file phụ lục (Word/Excel) lên Storage rồi ghi 1 dòng vào phu_luc_hop_dong.
+// meta: { so_phu_luc, ten_phu_luc, ngay_bat_dau, ngay_ket_thuc, noi_dung } — ten_phu_luc
+// để trống thì dùng luôn tên file làm tên phụ lục.
+export async function createPhuLucWithFile(hopDongId, file, meta = {}) {
+  const ext = file.name.split('.').pop()
+  const rand = typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).slice(2)
+  const path = `${hopDongId}/${Date.now()}-${rand}.${ext}`
+
+  const { error: upErr } = await supabase.storage.from(PHU_LUC_BUCKET).upload(path, file)
+  if (upErr) return { data: null, error: upErr }
+
+  const res = await supabase
+    .from('phu_luc_hop_dong')
+    .insert({
+      hop_dong_id: hopDongId,
+      so_phu_luc: meta.so_phu_luc || null,
+      ten_phu_luc: meta.ten_phu_luc || file.name,
+      ngay_bat_dau: meta.ngay_bat_dau || null,
+      ngay_ket_thuc: meta.ngay_ket_thuc || null,
+      noi_dung: meta.noi_dung || null,
+      storage_path: path,
+      ten_file: file.name,
+    })
+    .select()
+    .single()
+
+  if (res.error) {
+    // Rollback file đã upload nếu ghi DB thất bại.
+    await supabase.storage.from(PHU_LUC_BUCKET).remove([path])
+  }
+  return res
+}
+
+// Link tạm (1 giờ) để xem/tải file phụ lục.
+export async function getPhuLucSignedUrl(storagePath) {
+  return supabase.storage.from(PHU_LUC_BUCKET).createSignedUrl(storagePath, 3600)
+}
+
+// Giữ lại cho tương thích ngược (phụ lục nhập tay cũ không có file).
 export async function createPhuLuc(payload) {
   return supabase.from('phu_luc_hop_dong').insert(payload).select().single()
 }
-export async function deletePhuLuc(id) {
+
+export async function deletePhuLuc(id, storagePath) {
+  if (storagePath) {
+    await supabase.storage.from(PHU_LUC_BUCKET).remove([storagePath])
+  }
   return supabase.from('phu_luc_hop_dong').delete().eq('id', id)
 }
 
