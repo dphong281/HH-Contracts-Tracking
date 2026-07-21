@@ -114,11 +114,12 @@ export async function deleteNhanVien(id) {
 }
 
 // ---------- HỢP ĐỒNG ----------
-// gia_tri_hop_dong được mã hoá -> cột lưu dạng text, đọc ra phải ép lại về Number
+// gia_tri_hop_dong và han_muc_cong_no được mã hoá -> cột lưu dạng text, đọc ra phải ép lại về Number
 async function decryptHopDong(row) {
   if (!row) return row
-  const decrypted = await decryptField(row.gia_tri_hop_dong)
-  return { ...row, gia_tri_hop_dong: Number(decrypted) || 0 }
+  const giaTri = await decryptField(row.gia_tri_hop_dong)
+  const hanMuc = row.han_muc_cong_no ? await decryptField(row.han_muc_cong_no) : null
+  return { ...row, gia_tri_hop_dong: Number(giaTri) || 0, han_muc_cong_no: hanMuc !== null ? Number(hanMuc) || 0 : null }
 }
 
 export async function getHopDongList() {
@@ -140,6 +141,9 @@ export async function getHopDongById(id) {
 }
 export async function createHopDong(payload) {
   const encrypted = { ...payload, gia_tri_hop_dong: await encryptField(payload.gia_tri_hop_dong) }
+  if ('han_muc_cong_no' in payload && payload.han_muc_cong_no !== null && payload.han_muc_cong_no !== '') {
+    encrypted.han_muc_cong_no = await encryptField(payload.han_muc_cong_no)
+  }
   const res = await supabase.from('hop_dong_dau_ra').insert(encrypted).select().single()
   if (res.error) return res
   return { ...res, data: await decryptHopDong(res.data) }
@@ -148,6 +152,11 @@ export async function updateHopDong(id, payload, expectedUpdatedAt) {
   const encrypted = { ...payload }
   if ('gia_tri_hop_dong' in encrypted) {
     encrypted.gia_tri_hop_dong = await encryptField(encrypted.gia_tri_hop_dong)
+  }
+  if ('han_muc_cong_no' in encrypted) {
+    encrypted.han_muc_cong_no = encrypted.han_muc_cong_no !== null && encrypted.han_muc_cong_no !== ''
+      ? await encryptField(encrypted.han_muc_cong_no)
+      : null
   }
   const res = await updateWithLock('hop_dong_dau_ra', id, expectedUpdatedAt, encrypted)
   if (res.error) return res
@@ -196,6 +205,7 @@ export async function getCongNoList() {
       ngay_bat_dau: hd.ngay_bat_dau,
       ngay_ket_thuc: hd.ngay_ket_thuc,
       gia_tri_hop_dong: hd.gia_tri_hop_dong,
+      han_muc_cong_no: hd.han_muc_cong_no,
       trang_thai: hd.trang_thai,
       tien_da_thanh_toan: tienDaThanhToan,
       cong_no_con_lai: hd.gia_tri_hop_dong - tienDaThanhToan,

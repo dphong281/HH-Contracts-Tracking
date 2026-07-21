@@ -10,7 +10,7 @@ import {
 
 const EMPTY_FORM = {
   khach_hang_id: '', nhan_vien_id: '', so_hop_dong: '', ngay_bat_dau: '', ngay_ket_thuc: '',
-  gia_tri_hop_dong: '', trang_thai: 'dang_hieu_luc', ghi_chu: '', ghi_chu_hop_dong: '',
+  gia_tri_hop_dong: '', han_muc_cong_no: '', trang_thai: 'dang_hieu_luc', ghi_chu: '', ghi_chu_hop_dong: '',
 }
 
 export default function HopDong() {
@@ -61,6 +61,7 @@ export default function HopDong() {
       khach_hang_id: form.khach_hang_id || null,
       nhan_vien_id: form.nhan_vien_id || null,
       gia_tri_hop_dong: Number(form.gia_tri_hop_dong) || 0,
+      han_muc_cong_no: form.han_muc_cong_no !== '' ? Number(form.han_muc_cong_no) : null,
       ngay_bat_dau: form.ngay_bat_dau || null,
       ngay_ket_thuc: form.ngay_ket_thuc || null,
     }
@@ -469,6 +470,13 @@ export default function HopDong() {
               min="0"
               value={form.gia_tri_hop_dong}
               onChange={(e) => setForm({ ...form, gia_tri_hop_dong: e.target.value })}
+            />
+            <Input
+              label="Hạn mức công nợ (đ)"
+              type="number"
+              min="0"
+              value={form.han_muc_cong_no}
+              onChange={(e) => setForm({ ...form, han_muc_cong_no: e.target.value })}
             />
           </div>
           <Textarea

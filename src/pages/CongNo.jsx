@@ -5,6 +5,13 @@ import { PHAN_LOAI_LABELS, formatCurrency, formatDate } from '../lib/format'
 import { Card, Badge, StatCard, EmptyState, LoadingState, ErrorState } from '../components/ui'
 import { useRealtimeRefresh } from '../lib/useRealtime'
 
+const PHAN_LOAI_COLORS = {
+  DL: 'bg-[#E8973A]/15 text-[#C97A22]',
+  MB: 'bg-[#2F7A5E]/12 text-[#2F7A5E]',
+  TNPP: 'bg-[#0F2A3D]/10 text-[#0F2A3D]',
+  TTTT: 'bg-[#6B7680]/12 text-[#6B7680]',
+}
+
 export default function CongNo() {
   const [list, setList] = useState([])
   const [loading, setLoading] = useState(true)
@@ -56,10 +63,12 @@ export default function CongNo() {
           <table className="w-full text-sm">
             <thead>
               <tr className="text-left text-xs text-[var(--color-text-muted)] uppercase tracking-wide border-b border-[var(--color-line)]">
-                <th className="px-5 py-3 font-medium">Số HĐ</th>
                 <th className="px-5 py-3 font-medium">Khách hàng</th>
+                <th className="px-5 py-3 font-medium">Phân loại</th>
                 <th className="px-5 py-3 font-medium">Nhân viên PT</th>
+                <th className="px-5 py-3 font-medium">Thời hạn</th>
                 <th className="px-5 py-3 font-medium text-right">Giá trị HĐ</th>
+                <th className="px-5 py-3 font-medium text-right">Hạn mức công nợ</th>
                 <th className="px-5 py-3 font-medium text-right">Đã thanh toán</th>
                 <th className="px-5 py-3 font-medium text-right">Còn nợ</th>
               </tr>
@@ -68,14 +77,23 @@ export default function CongNo() {
               {filtered.map((r) => (
                 <tr key={r.id} className="border-b border-[var(--color-line)] last:border-0 hover:bg-black/[0.015]">
                   <td className="px-5 py-3 font-medium text-[var(--color-ink)]">
-                    <Link to={`/hop-dong/${r.id}`} className="hover:underline">{r.so_hop_dong}</Link>
+                    <Link to={`/hop-dong/${r.id}`} className="hover:underline">{r.ten_khach_hang || '—'}</Link>
                   </td>
                   <td className="px-5 py-3">
-                    {r.ten_khach_hang || '—'}
-                    {r.phan_loai && <span className="text-xs text-[var(--color-text-muted)] ml-1">({PHAN_LOAI_LABELS[r.phan_loai]})</span>}
+                    {r.phan_loai ? (
+                      <Badge className={PHAN_LOAI_COLORS[r.phan_loai]}>{PHAN_LOAI_LABELS[r.phan_loai] || r.phan_loai}</Badge>
+                    ) : '—'}
                   </td>
                   <td className="px-5 py-3 text-[var(--color-text-muted)]">{r.nhan_vien_phu_trach || '—'}</td>
+                  <td className="px-5 py-3 text-[var(--color-text-muted)]">
+                    {r.ngay_bat_dau || r.ngay_ket_thuc
+                      ? `${formatDate(r.ngay_bat_dau)} → ${formatDate(r.ngay_ket_thuc)}`
+                      : '—'}
+                  </td>
                   <td className="px-5 py-3 text-right">{formatCurrency(r.gia_tri_hop_dong)}</td>
+                  <td className="px-5 py-3 text-right text-[var(--color-text-muted)]">
+                    {r.han_muc_cong_no ? formatCurrency(r.han_muc_cong_no) : '—'}
+                  </td>
                   <td className="px-5 py-3 text-right text-[var(--color-good)]">{formatCurrency(r.tien_da_thanh_toan)}</td>
                   <td className="px-5 py-3 text-right font-medium">
                     <Badge className={Number(r.cong_no_con_lai) > 0 ? 'bg-[#C0432E]/10 text-[#C0432E]' : 'bg-[#2F7A5E]/10 text-[#2F7A5E]'}>

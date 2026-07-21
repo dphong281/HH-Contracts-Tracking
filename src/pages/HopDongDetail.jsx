@@ -62,6 +62,7 @@ export default function HopDongDetail() {
       ngay_bat_dau: hd.ngay_bat_dau || '',
       ngay_ket_thuc: hd.ngay_ket_thuc || '',
       gia_tri_hop_dong: hd.gia_tri_hop_dong || 0,
+      han_muc_cong_no: hd.han_muc_cong_no ?? '',
       trang_thai: hd.trang_thai,
       ghi_chu: hd.ghi_chu || '',
       ghi_chu_hop_dong: hd.ghi_chu_hop_dong || '',
@@ -79,6 +80,7 @@ export default function HopDongDetail() {
       khach_hang_id: editForm.khach_hang_id || null,
       nhan_vien_id: editForm.nhan_vien_id || null,
       gia_tri_hop_dong: Number(editForm.gia_tri_hop_dong) || 0,
+      han_muc_cong_no: editForm.han_muc_cong_no !== '' ? Number(editForm.han_muc_cong_no) : null,
       ngay_bat_dau: editForm.ngay_bat_dau || null,
       ngay_ket_thuc: editForm.ngay_ket_thuc || null,
     }
@@ -405,6 +407,7 @@ export default function HopDongDetail() {
               <Input label="Ngày bắt đầu" type="date" value={editForm.ngay_bat_dau || ''} onChange={(e) => setEditForm({ ...editForm, ngay_bat_dau: e.target.value })} />
               <Input label="Ngày kết thúc" type="date" value={editForm.ngay_ket_thuc || ''} onChange={(e) => setEditForm({ ...editForm, ngay_ket_thuc: e.target.value })} />
               <Input label="Giá trị hợp đồng (đ)" type="number" min="0" value={editForm.gia_tri_hop_dong} onChange={(e) => setEditForm({ ...editForm, gia_tri_hop_dong: e.target.value })} />
+              <Input label="Hạn mức công nợ (đ)" type="number" min="0" value={editForm.han_muc_cong_no} onChange={(e) => setEditForm({ ...editForm, han_muc_cong_no: e.target.value })} />
             </div>
             <Textarea label="Ghi chú" rows={3} value={editForm.ghi_chu || ''} onChange={(e) => setEditForm({ ...editForm, ghi_chu: e.target.value })} />
             <Textarea label="Ghi chú hợp đồng" rows={3} value={editForm.ghi_chu_hop_dong || ''} onChange={(e) => setEditForm({ ...editForm, ghi_chu_hop_dong: e.target.value })} />
