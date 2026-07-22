@@ -9,6 +9,7 @@ import NhanVien from './pages/NhanVien'
 import HopDong from './pages/HopDong'
 import HopDongDetail from './pages/HopDongDetail'
 import CongNo from './pages/CongNo'
+import DuDoan from './pages/DuDoan'
 import NhatKy from './pages/NhatKy'
 import CaiDat from './pages/CaiDat'
 
@@ -36,6 +37,7 @@ export default function App() {
         <Route path="/khach-hang" element={<KhachHang />} />
         <Route path="/khach-hang/:id" element={<KhachHangDetail />} />
         <Route path="/cong-no" element={<CongNo />} />
+        <Route path="/du-doan" element={<DuDoan />} />
         <Route path="/nhan-vien" element={<NhanVien />} />
         <Route path="/nhat-ky" element={<NhatKy />} />
         <Route path="/cai-dat" element={<CaiDat />} />

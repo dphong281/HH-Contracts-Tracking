@@ -404,6 +404,24 @@ export async function getPhuLucByKhachHang(khachHangId) {
   return { data, error: null }
 }
 
+// ---------- DỰ ĐOÁN RỦI RO CÔNG NỢ (thống kê dựa trên dữ liệu thực tế, KHÔNG dùng AI/LLM) ----------
+// Lấy toàn bộ hợp đồng + thanh toán để trang Dự đoán tự tính điểm rủi ro ở phía client
+// (xem lib/duDoan.js cho công thức tính điểm).
+export async function getDuDoanData() {
+  const [hdRes, ttRes] = await Promise.all([
+    supabase.from('hop_dong_dau_ra').select('*, khach_hang(id, ten_khach_hang, phan_loai)'),
+    supabase.from('thanh_toan').select('*'),
+  ])
+  if (hdRes.error) return { data: null, error: hdRes.error }
+  if (ttRes.error) return { data: null, error: ttRes.error }
+
+  const hopDongs = await Promise.all(hdRes.data.map(decryptHopDong))
+  const thanhToans = await Promise.all(
+    ttRes.data.map(async (tt) => ({ ...tt, so_tien: Number(await decryptField(tt.so_tien)) || 0 }))
+  )
+  return { data: { hopDongs, thanhToans }, error: null }
+}
+
 // ---------- THANH TOÁN ----------
 // so_tien được mã hoá -> cột lưu dạng text, đọc ra phải ép lại về Number
 export async function getThanhToanByHopDong(hopDongId) {
