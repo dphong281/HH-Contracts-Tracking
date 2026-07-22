@@ -4,6 +4,7 @@ import { useAuth } from '../context/AuthContext'
 const NAV_ITEMS = [
   { to: '/', label: 'Tổng quan', icon: IconGrid, end: true },
   { to: '/hop-dong', label: 'Hợp đồng', icon: IconDoc },
+  { to: '/du-doan', label: 'Dự đoán', icon: IconTrendingUp },
   { to: '/khach-hang', label: 'Khách hàng', icon: IconUsers },
   { to: '/cong-no', label: 'Công nợ', icon: IconWallet },
   { to: '/nhan-vien', label: 'Nhân viên', icon: IconBadge },
