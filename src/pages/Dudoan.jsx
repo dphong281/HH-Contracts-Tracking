@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { getDuDoanData } from '../lib/queries'
-import { tinhDiemRuiRoTatCa, LEVEL_LABELS, LEVEL_COLORS } from '../lib/duDoan'
+import { tinhDiemRuiRoTatCa, LEVEL_LABELS, LEVEL_COLORS } from '../lib/DuDoan'
 import { PHAN_LOAI_LABELS, formatCurrency, formatDate } from '../lib/format'
 import { Card, Badge, StatCard, EmptyState, LoadingState, ErrorState } from '../components/ui'
 import { useRealtimeRefresh } from '../lib/useRealtime'
