@@ -1,3 +1,4 @@
+@import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600&display=swap');
 @import "tailwindcss";
 
 :root {
@@ -12,6 +13,9 @@
   --color-text-muted: #6B7680;
   --color-danger: #C0432E;
   --color-good: #2F7A5E;
+
+  --font-display: 'Space Grotesk', Arial, sans-serif;
+  --font-body: 'Inter', Arial, sans-serif;
 }
 
 * { box-sizing: border-box; }
@@ -20,12 +24,13 @@ body {
   margin: 0;
   background: var(--color-bg);
   color: var(--color-text);
-  font-family: Arial, sans-serif;
+  font-family: var(--font-body);
   -webkit-font-smoothing: antialiased;
 }
 
 h1, h2, h3, h4, .font-display {
-  font-family: Arial, sans-serif;
+  font-family: var(--font-display);
+  letter-spacing: -0.01em;
 }
 
 ::selection {
@@ -36,9 +41,44 @@ h1, h2, h3, h4, .font-display {
 /* scrollbar polish */
 ::-webkit-scrollbar { width: 10px; height: 10px; }
 ::-webkit-scrollbar-track { background: transparent; }
-::-webkit-scrollbar-thumb { background: #d8d3c6; border-radius: 8px; }
+::-webkit-scrollbar-thumb { background: #d8d3c6; border-radius: 8px; transition: background 0.2s; }
 ::-webkit-scrollbar-thumb:hover { background: #c7c1b0; }
 
 input, select, textarea {
   font-family: inherit;
+}
+
+/* ---------- Chuyển động dùng chung ---------- */
+
+@keyframes qlhd-fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes qlhd-scale-in {
+  from { opacity: 0; transform: scale(0.96) translateY(4px); }
+  to { opacity: 1; transform: scale(1) translateY(0); }
+}
+
+@keyframes qlhd-spin {
+  to { transform: rotate(360deg); }
+}
+
+.qlhd-spinner {
+  width: 1.1rem;
+  height: 1.1rem;
+  border-radius: 9999px;
+  border: 2px solid currentColor;
+  border-top-color: transparent;
+  animation: qlhd-spin 0.7s linear infinite;
+}
+
+/* Tôn trọng cài đặt "giảm chuyển động" của người dùng */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
 }
