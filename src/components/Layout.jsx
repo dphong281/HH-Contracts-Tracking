@@ -33,14 +33,16 @@ export default function Layout({ children }) {
               to={to}
               end={end}
               className={({ isActive }) =>
-                `flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors ${
+                `group flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all duration-200 active:scale-[0.98] ${
                   isActive
-                    ? 'bg-[var(--color-amber)] text-[var(--color-ink)]'
-                    : 'text-white/75 hover:bg-white/10 hover:text-white'
+                    ? 'bg-[var(--color-amber)] text-[var(--color-ink)] shadow-sm'
+                    : 'text-white/75 hover:bg-white/10 hover:text-white hover:translate-x-0.5'
                 }`
               }
             >
-              <Icon />
+              <span className="transition-transform duration-200 group-hover:scale-110">
+                <Icon />
+              </span>
               {label}
             </NavLink>
           ))}
@@ -53,7 +55,7 @@ export default function Layout({ children }) {
             </div>
             <button
               onClick={signOut}
-              className="shrink-0 text-xs text-white/60 hover:text-white px-2 py-1.5 rounded-md hover:bg-white/10"
+              className="shrink-0 text-xs text-white/60 hover:text-white px-2 py-1.5 rounded-md hover:bg-white/10 transition-all duration-150 active:scale-95 cursor-pointer"
               title="Đăng xuất"
             >
               Đăng xuất
